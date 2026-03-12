@@ -25,7 +25,13 @@ from selfhub_cli.secrets import (
 )
 from selfhub_cli.service import SelfHubService
 from selfhub_cli.settings import load_settings, save_settings
-from selfhub_cli.tool_catalog import CLI_TOOLS, SLASH_TOOLS, build_tools_payload
+from selfhub_cli.tool_catalog import (
+    CLI_TOOLS,
+    SLASH_TOOLS,
+    build_agent_spec_payload,
+    build_agent_system_prompt,
+    build_tools_payload,
+)
 
 app = typer.Typer(help="SelfHub CLI")
 console = Console()
@@ -37,6 +43,7 @@ COMMAND_NAMES: tuple[str, ...] = (
     "save",
     "delete",
     "tools",
+    "agent-spec",
     "recall",
     "read",
     "status",
@@ -52,6 +59,7 @@ OPTION_COMMAND_ALIASES: dict[str, str] = {
     "--save": "save",
     "--delete": "delete",
     "--tools": "tools",
+    "--agent-spec": "agent-spec",
     "--recall": "recall",
     "--read": "read",
     "--status": "status",
@@ -594,6 +602,16 @@ def tools_command(
         _emit(payload, as_json=True)
         return
     _print_tools_catalog()
+
+
+@app.command("agent-spec")
+def agent_spec_command(
+    as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
+) -> None:
+    if as_json:
+        _emit(build_agent_spec_payload(), as_json=True)
+        return
+    typer.echo(build_agent_system_prompt())
 
 
 @app.command("read")

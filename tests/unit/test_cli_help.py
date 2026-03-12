@@ -10,6 +10,7 @@ def test_cli_help_contains_commands() -> None:
     assert "save" in result.stdout
     assert "delete" in result.stdout
     assert "tools" in result.stdout
+    assert "agent-spec" in result.stdout
     assert "search" in result.stdout
     assert "recall" in result.stdout
     assert "setup" in result.stdout

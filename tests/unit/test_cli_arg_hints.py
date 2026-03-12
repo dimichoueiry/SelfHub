@@ -31,3 +31,9 @@ def test_normalize_option_style_recall() -> None:
     args, hint = _normalize_argv(["--recall", "what do you know about me"])
     assert args == ["recall", "what do you know about me"]
     assert hint is not None
+
+
+def test_normalize_option_style_agent_spec() -> None:
+    args, hint = _normalize_argv(["--agent-spec"])
+    assert args == ["agent-spec"]
+    assert hint is not None

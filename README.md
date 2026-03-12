@@ -92,6 +92,13 @@ Discover available automation-friendly commands at any time:
 selfhub tools
 ```
 
+Generate a strict agent contract (workflow + grounding rules):
+
+```bash
+selfhub agent-spec
+selfhub agent-spec --json
+```
+
 Recall broad memory context in one call:
 
 ```bash

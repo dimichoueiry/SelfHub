@@ -17,6 +17,20 @@ class ToolSpec:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class WorkflowSpec:
+    name: str
+    when: str
+    steps: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "when": self.when,
+            "steps": list(self.steps),
+        }
+
+
 CLI_TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="init",
@@ -78,6 +92,11 @@ CLI_TOOLS: tuple[ToolSpec, ...] = (
         usage="selfhub tools [--json]",
         purpose="List SelfHub tool capabilities for users and agents.",
     ),
+    ToolSpec(
+        name="agent-spec",
+        usage="selfhub agent-spec [--json]",
+        purpose="Output recommended grounding workflow and rules for agent integrations.",
+    ),
 )
 
 
@@ -98,6 +117,35 @@ SLASH_TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(name="/exit", usage="/exit", purpose="Exit console."),
 )
 
+GROUNDING_RULES: tuple[str, ...] = (
+    "Always run `selfhub recall` before answering user-memory questions.",
+    "Then run `selfhub read` on top file paths from recall for verification.",
+    "Ground answers in retrieved evidence; avoid unsupported assumptions.",
+    "If no relevant evidence is found, explicitly say memory is missing and ask user to save it.",
+    "For new durable personal facts, call `selfhub save`.",
+)
+
+AGENT_WORKFLOWS: tuple[WorkflowSpec, ...] = (
+    WorkflowSpec(
+        name="memory_qa",
+        when="User asks about profile, career, preferences, goals, or prior facts.",
+        steps=(
+            "Run: selfhub recall \"<user question>\" --json",
+            "From top recall results, run: selfhub read <path> for 1-3 files",
+            "Answer using only retrieved facts; mention uncertainty when evidence is weak",
+        ),
+    ),
+    WorkflowSpec(
+        name="memory_write",
+        when="User states a new personal fact they want remembered.",
+        steps=(
+            "Run: selfhub save \"<fact>\" (or pass --file when explicit target is known)",
+            "If save asks for resolution, follow suggested file or duplicate prompts",
+            "Confirm saved file path and commit id back to the user",
+        ),
+    ),
+)
+
 
 def build_tools_payload() -> dict[str, object]:
     return {
@@ -105,4 +153,32 @@ def build_tools_payload() -> dict[str, object]:
         "message": "SelfHub tool catalog.",
         "tools": [tool.to_dict() for tool in CLI_TOOLS],
         "slash_tools": [tool.to_dict() for tool in SLASH_TOOLS],
+        "grounding_rules": list(GROUNDING_RULES),
+        "workflows": [workflow.to_dict() for workflow in AGENT_WORKFLOWS],
     }
+
+
+def build_agent_spec_payload() -> dict[str, object]:
+    return {
+        "success": True,
+        "message": "SelfHub agent contract.",
+        "grounding_rules": list(GROUNDING_RULES),
+        "workflows": [workflow.to_dict() for workflow in AGENT_WORKFLOWS],
+        "tools": [tool.to_dict() for tool in CLI_TOOLS],
+        "slash_tools": [tool.to_dict() for tool in SLASH_TOOLS],
+    }
+
+
+def build_agent_system_prompt() -> str:
+    lines = [
+        "SelfHub Agent Contract",
+        "",
+        "Grounding Rules:",
+    ]
+    lines.extend(f"- {rule}" for rule in GROUNDING_RULES)
+    lines.append("")
+    lines.append("Required Workflows:")
+    for workflow in AGENT_WORKFLOWS:
+        lines.append(f"- {workflow.name}: {workflow.when}")
+        lines.extend(f"  - {step}" for step in workflow.steps)
+    return "\n".join(lines)
