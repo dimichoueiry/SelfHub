@@ -140,7 +140,6 @@ def run_console(
             )
             continue
 
-        _print_chat_turn("You", text, border_style="cyan")
         turn_messages = list(history)
         memory_context = _build_memory_context(service, text)
         if memory_context is not None:
