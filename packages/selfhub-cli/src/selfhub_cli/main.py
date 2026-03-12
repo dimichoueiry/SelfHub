@@ -9,6 +9,11 @@ from typing import Annotated
 
 import click
 import typer
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from selfhub_cli.chat_mode import run_console
 from selfhub_cli.runtime import resolve_chat_client, resolve_repo_path, resolve_save_intelligence
@@ -22,6 +27,7 @@ from selfhub_cli.service import SelfHubService
 from selfhub_cli.settings import load_settings, save_settings
 
 app = typer.Typer(help="SelfHub CLI")
+console = Console()
 
 COMMAND_NAMES: tuple[str, ...] = (
     "init",
@@ -198,9 +204,7 @@ def setup_command(
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
     settings = load_settings()
-    typer.secho("SelfHub Setup Wizard", fg=typer.colors.CYAN, bold=True)
-    typer.echo("This step-by-step flow configures your repository, model provider, and secrets.")
-    typer.echo("Nothing is pushed remotely unless you choose a remote/GitHub mode.")
+    _print_wizard_landing()
 
     _print_step(
         1,
@@ -228,10 +232,10 @@ def setup_command(
     github_token: str | None = None
 
     if setup_mode == "remote":
-        typer.echo("Using an existing remote keeps your current hosting setup unchanged.")
+        _print_note("Using an existing remote keeps your current hosting setup unchanged.")
         remote_url = typer.prompt("Remote URL (SSH or HTTPS)").strip()
     elif setup_mode == "github":
-        typer.echo("GitHub bootstrap will create/find private repo 'selfhub' for this account.")
+        _print_note("GitHub bootstrap will create/find private repo 'selfhub' for this account.")
         github_owner = typer.prompt(
             "GitHub owner (username or org)",
             default=settings.github_owner or "",
@@ -269,7 +273,7 @@ def setup_command(
 
     if thinking_provider == "openrouter":
         configured_thinking_provider = "openrouter"
-        typer.echo("OpenRouter model options (cheap, balanced, premium):")
+        _print_note("OpenRouter model options include cheap, balanced, and premium picks.")
         configured_thinking_model = _choose_model(
             provider="openrouter",
             current_model=settings.thinking_model,
@@ -282,7 +286,7 @@ def setup_command(
             key_saved = _store_secret(SECRET_OPENROUTER_API_KEY, openrouter_key)
     elif thinking_provider == "ollama":
         configured_thinking_provider = "ollama"
-        typer.echo("Ollama local model options (includes Qwen):")
+        _print_note("Ollama local model options include Qwen and other strong local choices.")
         configured_thinking_model = _choose_model(
             provider="ollama",
             current_model=settings.thinking_model,
@@ -308,7 +312,7 @@ def setup_command(
     )
     if chat_provider == "openrouter":
         configured_chat_provider = "openrouter"
-        typer.echo("OpenRouter chat model options:")
+        _print_note("Choose the model you want for live chat conversations.")
         configured_chat_model = _choose_model(
             provider="openrouter",
             current_model=settings.chat_model or settings.thinking_model,
@@ -321,7 +325,7 @@ def setup_command(
             key_saved = _store_secret(SECRET_OPENROUTER_API_KEY, openrouter_key) or key_saved
     elif chat_provider == "ollama":
         configured_chat_provider = "ollama"
-        typer.echo("Ollama chat model options (includes Qwen):")
+        _print_note("Choose your local chat model. Qwen options are fully supported.")
         configured_chat_model = _choose_model(
             provider="ollama",
             current_model=settings.chat_model or settings.thinking_model,
@@ -561,12 +565,16 @@ def main() -> None:
 
 
 def _print_step(step_number: int, total_steps: int, title: str, description: str) -> None:
-    typer.secho(
-        f"\nStep {step_number}/{total_steps}: {title}",
-        fg=typer.colors.BRIGHT_CYAN,
-        bold=True,
+    console.print()
+    console.print(
+        Panel(
+            Text(description),
+            title=f"Step {step_number}/{total_steps} - {title}",
+            border_style="bright_cyan",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
     )
-    typer.echo(description)
 
 
 def _choose_option(
@@ -575,9 +583,21 @@ def _choose_option(
     default_value: str,
 ) -> str:
     default_index = _default_option_index(options, default_value)
+    table = Table(
+        show_header=True,
+        header_style="bold bright_white",
+        box=box.SIMPLE_HEAVY,
+        expand=False,
+    )
+    table.add_column("#", justify="right", style="bold cyan", no_wrap=True)
+    table.add_column("Option", style="bold green")
+    table.add_column("Details", style="white")
+
     for index, option in enumerate(options, start=1):
-        typer.secho(f"  {index}. {option.label}", fg=typer.colors.GREEN)
-        typer.echo(f"     {option.description}")
+        default_tag = " (default)" if index == default_index else ""
+        table.add_row(str(index), f"{option.label}{default_tag}", option.description)
+
+    console.print(table)
 
     raw_choice = typer.prompt(
         f"{prompt} (number or value)",
@@ -629,21 +649,65 @@ def _print_summary(
     chat_model: str | None,
     ollama_url: str | None,
 ) -> None:
-    typer.secho("Setup summary:", fg=typer.colors.BRIGHT_WHITE, bold=True)
-    typer.echo(f"  repo_path: {repo_path}")
-    typer.echo(f"  repository_mode: {setup_mode}")
+    table = Table(show_header=False, box=box.SIMPLE_HEAVY, expand=False)
+    table.add_column("Setting", style="bold cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("repo_path", str(repo_path))
+    table.add_row("repository_mode", setup_mode)
     if remote_url:
-        typer.echo(f"  remote_url: {remote_url}")
+        table.add_row("remote_url", remote_url)
     if github_owner and setup_mode == "github":
-        typer.echo(f"  github_owner: {github_owner}")
-    typer.echo(f"  thinking_provider: {thinking_provider or 'none'}")
+        table.add_row("github_owner", github_owner)
+    table.add_row("thinking_provider", thinking_provider or "none")
     if thinking_model:
-        typer.echo(f"  thinking_model: {thinking_model}")
-    typer.echo(f"  chat_provider: {chat_provider or 'none'}")
+        table.add_row("thinking_model", thinking_model)
+    table.add_row("chat_provider", chat_provider or "none")
     if chat_model:
-        typer.echo(f"  chat_model: {chat_model}")
+        table.add_row("chat_model", chat_model)
     if ollama_url:
-        typer.echo(f"  ollama_base_url: {ollama_url}")
+        table.add_row("ollama_base_url", ollama_url)
+
+    console.print(
+        Panel(
+            table,
+            title="Setup summary",
+            border_style="green",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
+
+
+def _print_wizard_landing() -> None:
+    logo = Text(
+        "\n".join(
+            [
+                "  ____  _____ _     _____ _   _ _   _ ____  ",
+                " / ___|| ____| |   |  ___| | | | | | | __ ) ",
+                " \\___ \\|  _| | |   | |_  | |_| | | | |  _ \\ ",
+                "  ___) | |___| |___|  _| |  _  | |_| | |_) |",
+                " |____/|_____|_____|_|   |_| |_|\\___/|____/ ",
+            ]
+        ),
+        style="bold cyan",
+    )
+    subtitle = Text(
+        "A premium setup flow for your personal memory system.\n"
+        "This wizard configures repository wiring, model backends, and secrets.\n"
+        "Nothing is pushed remotely unless you choose a remote or GitHub mode.",
+        style="white",
+    )
+
+    body = Text()
+    body.append_text(logo)
+    body.append("\n\n")
+    body.append_text(subtitle)
+    console.print(Panel(body, border_style="cyan", box=box.DOUBLE, padding=(1, 2)))
+
+
+def _print_note(message: str) -> None:
+    console.print(Panel(message, border_style="blue", box=box.SQUARE, padding=(0, 1)))
 
 
 def _run_subcommand_from_console(args: list[str]) -> int:
