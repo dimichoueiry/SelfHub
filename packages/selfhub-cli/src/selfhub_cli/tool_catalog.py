@@ -45,7 +45,10 @@ CLI_TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="save",
         usage="selfhub save \"<memory>\" [--file <path>]",
-        purpose="Save memory entry, auto-commit, and auto-push when remote exists.",
+        purpose=(
+            "Save memory entry, auto-create custom --file paths, "
+            "auto-commit, and auto-push when remote exists."
+        ),
     ),
     ToolSpec(
         name="delete",
@@ -139,7 +142,10 @@ AGENT_WORKFLOWS: tuple[WorkflowSpec, ...] = (
         name="memory_write",
         when="User states a new personal fact they want remembered.",
         steps=(
-            "Run: selfhub save \"<fact>\" (or pass --file when explicit target is known)",
+            (
+                "Run: selfhub save \"<fact>\" "
+                "(or pass --file when explicit target is known; missing paths are created)"
+            ),
             "If save asks for resolution, follow suggested file or duplicate prompts",
             "Confirm saved file path and commit id back to the user",
         ),

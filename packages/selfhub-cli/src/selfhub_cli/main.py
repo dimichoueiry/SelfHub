@@ -443,7 +443,11 @@ def console_command(
 def save_command(
     content: Annotated[str, typer.Argument(help="Content to save")],
     file_path: Annotated[
-        str | None, typer.Option("--file", help="Optional target file path")
+        str | None,
+        typer.Option(
+            "--file",
+            help="Optional target file path; creates custom file/folder if missing",
+        ),
     ] = None,
     tool_name: Annotated[str, typer.Option(help="Tool name attributed in commit metadata")] = (
         "SelfHub CLI"
