@@ -16,5 +16,6 @@ def test_tools_command_json_includes_cli_and_slash_tools() -> None:
 
     assert "save" in cli_tool_names
     assert "search" in cli_tool_names
+    assert "recall" in cli_tool_names
     assert "/tools" in slash_tool_names
     assert "/chat" in slash_tool_names

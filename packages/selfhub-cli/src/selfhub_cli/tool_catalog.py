@@ -49,6 +49,11 @@ CLI_TOOLS: tuple[ToolSpec, ...] = (
         purpose="Find relevant memory snippets across your SelfHub repository.",
     ),
     ToolSpec(
+        name="recall",
+        usage="selfhub recall \"<question>\" [--mode hybrid|semantic|exact] [--limit <n>]",
+        purpose="Run multi-query memory recall tuned for broad human questions.",
+    ),
+    ToolSpec(
         name="status",
         usage="selfhub status",
         purpose="Show git state for your SelfHub repo.",

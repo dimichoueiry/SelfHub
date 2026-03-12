@@ -73,6 +73,24 @@ def test_search_hybrid_handles_what_did_you_save_in_my_career(tmp_path: Path) ->
     assert "OpenLearn-Architecture-Builder" in results[0].excerpt
 
 
+def test_recall_returns_results_for_broad_question(tmp_path: Path) -> None:
+    repo_path = tmp_path / "selfhub"
+    service = SelfHubService(repo_path)
+    service.init_repo()
+    service.save(
+        "I am building OpenLearn and SelfHub",
+        file_path="experiences/career.md",
+    )
+
+    recall = service.recall("what do you know about me?")
+    assert recall.success is True
+    assert recall.data is not None
+    results = recall.data["results"]
+    assert isinstance(results, list)
+    assert results
+    assert any(item["path"] == "/experiences/career.md" for item in results)
+
+
 def test_status_and_sync_without_remote(tmp_path: Path) -> None:
     repo_path = tmp_path / "selfhub"
     service = SelfHubService(repo_path)

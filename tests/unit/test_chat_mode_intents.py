@@ -11,7 +11,6 @@ from selfhub_cli.chat_mode import (
     _is_dismiss_save,
     _is_save_choice_one,
     _is_save_choice_two,
-    _looks_like_self_summary_request,
 )
 from selfhub_cli.service import SelfHubService
 
@@ -97,9 +96,3 @@ def test_build_memory_context_supports_broad_about_me_prompt(tmp_path: Path) -> 
     assert context is not None
     assert "/experiences/career.md" in context
     assert "openlearn" in context.lower()
-
-
-def test_detects_self_summary_requests() -> None:
-    assert _looks_like_self_summary_request("what do you know about me")
-    assert _looks_like_self_summary_request("what am i making right now")
-    assert not _looks_like_self_summary_request("save this to career")

@@ -65,3 +65,38 @@ def test_e2e_delete_entry(tmp_path: Path) -> None:
     )
     assert read.exit_code == 0
     assert "Temporary wrong entry" not in read.stdout
+
+
+def test_e2e_recall_returns_memory_matches(tmp_path: Path) -> None:
+    runner = CliRunner()
+    repo_path = tmp_path / "selfhub"
+
+    init = runner.invoke(app, ["init", "--repo-path", str(repo_path)])
+    assert init.exit_code == 0
+
+    saved = runner.invoke(
+        app,
+        [
+            "save",
+            "I am building SelfHub and OpenLearn",
+            "--file",
+            "experiences/career.md",
+            "--repo-path",
+            str(repo_path),
+        ],
+    )
+    assert saved.exit_code == 0
+
+    recalled = runner.invoke(
+        app,
+        [
+            "recall",
+            "what do you know about me?",
+            "--repo-path",
+            str(repo_path),
+            "--json",
+        ],
+    )
+    assert recalled.exit_code == 0
+    assert "\"success\": true" in recalled.stdout.lower()
+    assert "/experiences/career.md" in recalled.stdout

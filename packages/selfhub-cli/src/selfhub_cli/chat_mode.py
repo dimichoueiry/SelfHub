@@ -8,7 +8,6 @@ from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from selfhub_core.contracts import SearchResult
 
 from selfhub_cli.chat_models import ChatClient, ChatMessage, ChatModelError
 from selfhub_cli.service import SelfHubService
@@ -272,18 +271,10 @@ def _build_memory_context(service: SelfHubService, user_text: str) -> str | None
     if len(query) < 3:
         return None
 
-    results = _search_memory(service, query, limit=4)
-    if _looks_like_self_summary_request(query):
-        seeded_queries = [
-            query,
-            "career work projects",
-            "profile about me",
-            "current goals and plans",
-            "preferences and habits",
-            "writing style voice",
-        ]
-        results = _search_memory(service, *seeded_queries, limit=8)
-    if not results:
+    recall = service.recall(query=query, mode="hybrid", limit=8)
+    data = recall.data or {}
+    raw_results = data.get("results")
+    if not isinstance(raw_results, list) or not raw_results:
         return None
 
     lines = [
@@ -293,42 +284,16 @@ def _build_memory_context(service: SelfHubService, user_text: str) -> str | None
             "Do not claim you have no memory when snippets are provided."
         ),
     ]
-    for index, result in enumerate(results, start=1):
-        lines.append(f"{index}. {result.path}: {result.excerpt}")
-    return "\n".join(lines)
-
-
-def _search_memory(service: SelfHubService, *queries: str, limit: int) -> list[SearchResult]:
-    by_key: dict[tuple[str, str], SearchResult] = {}
-    for query in queries:
-        query_text = query.strip()
-        if not query_text:
+    for index, item in enumerate(raw_results[:4], start=1):
+        if not isinstance(item, dict):
             continue
-        for result in service.search(query=query_text, mode="hybrid", limit=limit):
-            key = (result.path, result.excerpt)
-            existing = by_key.get(key)
-            if existing is None or result.score > existing.score:
-                by_key[key] = result
-    merged = list(by_key.values())
-    merged.sort(key=lambda item: item.score, reverse=True)
-    return merged[:limit]
-
-
-def _looks_like_self_summary_request(text: str) -> bool:
-    lowered = text.lower()
-    patterns = (
-        "about me",
-        "know about me",
-        "who am i",
-        "what do you know",
-        "what am i doing",
-        "what i'm doing",
-        "what im doing",
-        "what am i making",
-        "what i'm making",
-        "what im making",
-    )
-    return any(pattern in lowered for pattern in patterns)
+        path = item.get("path")
+        excerpt = item.get("excerpt")
+        if isinstance(path, str) and isinstance(excerpt, str):
+            lines.append(f"{index}. {path}: {excerpt}")
+    if len(lines) <= 2:
+        return None
+    return "\n".join(lines)
 
 
 def _extract_slash_save_request(text: str) -> SlashSaveRequest | None:
@@ -402,7 +367,7 @@ def _print_chat_mode_intro(chat_ready: bool) -> None:
 def _print_console_help(mode: str) -> None:
     if mode == "command":
         print("Command mode help:")
-        print("- Run normal commands: read, save, status, sync, log, search")
+        print("- Run normal commands: read, save, delete, search, recall, status, sync, log")
         print("- /chat to enter chat mode")
         print("- /tools to inspect available tools")
         print("- /exit to quit")

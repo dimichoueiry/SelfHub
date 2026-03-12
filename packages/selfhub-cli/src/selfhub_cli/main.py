@@ -37,6 +37,7 @@ COMMAND_NAMES: tuple[str, ...] = (
     "save",
     "delete",
     "tools",
+    "recall",
     "read",
     "status",
     "sync",
@@ -51,6 +52,7 @@ OPTION_COMMAND_ALIASES: dict[str, str] = {
     "--save": "save",
     "--delete": "delete",
     "--tools": "tools",
+    "--recall": "recall",
     "--read": "read",
     "--status": "status",
     "--sync": "sync",
@@ -650,6 +652,18 @@ def search_command(
         "results": [item.to_dict() for item in results],
     }
     _emit(payload, as_json)
+
+
+@app.command("recall")
+def recall_command(
+    query: Annotated[str, typer.Argument(help="Question to recall memory for")],
+    mode: Annotated[str, typer.Option(help="Search mode: exact | semantic | hybrid")] = "hybrid",
+    limit: Annotated[int, typer.Option(help="Maximum number of ranked results")] = 8,
+    repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
+) -> None:
+    result = _service(repo_path).recall(query=query, mode=mode, limit=limit)
+    _emit(result.to_dict(), as_json)
 
 
 def main() -> None:

@@ -573,6 +573,84 @@ class SelfHubService:
 
         return sorted(results, key=lambda item: item.score, reverse=True)[:safe_limit]
 
+    def recall(self, query: str, mode: str = "hybrid", limit: int = 8) -> CommandResult:
+        if mode not in {"exact", "semantic", "hybrid"}:
+            return CommandResult(
+                success=False,
+                message="mode must be one of: exact, semantic, hybrid",
+            )
+
+        cleaned_query = query.strip()
+        if not cleaned_query:
+            return CommandResult(success=False, message="Query cannot be empty.")
+
+        safe_limit = max(1, min(limit, 25))
+        query_bundle = self._expand_recall_queries(cleaned_query)
+        merged = self._search_across_queries(
+            queries=query_bundle,
+            mode=mode,
+            limit=safe_limit,
+        )
+        if not merged:
+            return CommandResult(
+                success=True,
+                message="No matching memory found.",
+                data={
+                    "query": cleaned_query,
+                    "mode": mode,
+                    "expanded_queries": query_bundle,
+                    "results": [],
+                },
+            )
+
+        lines = ["Top matching memory snippets:"]
+        for index, item in enumerate(merged, start=1):
+            lines.append(f"{index}. {item.path} [{item.score:.2f}] {item.excerpt}")
+
+        return CommandResult(
+            success=True,
+            message="\n".join(lines),
+            data={
+                "query": cleaned_query,
+                "mode": mode,
+                "expanded_queries": query_bundle,
+                "results": [item.to_dict() for item in merged],
+            },
+        )
+
+    def _expand_recall_queries(self, query: str) -> list[str]:
+        if not _looks_like_self_summary_query(query):
+            return [query]
+        return [
+            query,
+            "career work projects",
+            "profile about me",
+            "current goals and plans",
+            "preferences and habits",
+            "writing style voice",
+        ]
+
+    def _search_across_queries(
+        self,
+        queries: list[str],
+        mode: str,
+        limit: int,
+    ) -> list[SearchResult]:
+        by_key: dict[tuple[str, str], SearchResult] = {}
+        for item in queries:
+            query = item.strip()
+            if not query:
+                continue
+            matches = self.search(query=query, mode=mode, limit=limit)
+            for match in matches:
+                key = (match.path, match.excerpt)
+                current = by_key.get(key)
+                if current is None or match.score > current.score:
+                    by_key[key] = match
+        merged = list(by_key.values())
+        merged.sort(key=lambda item: item.score, reverse=True)
+        return merged[:limit]
+
     def _best_match_for_file(
         self,
         rel_path: str,
@@ -905,3 +983,20 @@ def _excerpt_around(lines: list[str], center: int, radius: int = 1) -> str:
     if len(excerpt) <= 280:
         return excerpt
     return f"{excerpt[:277].rstrip()}..."
+
+
+def _looks_like_self_summary_query(text: str) -> bool:
+    lowered = text.lower()
+    patterns = (
+        "about me",
+        "know about me",
+        "who am i",
+        "what do you know",
+        "what am i doing",
+        "what i'm doing",
+        "what im doing",
+        "what am i making",
+        "what i'm making",
+        "what im making",
+    )
+    return any(pattern in lowered for pattern in patterns)

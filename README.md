@@ -92,6 +92,12 @@ Discover available automation-friendly commands at any time:
 selfhub tools
 ```
 
+Recall broad memory context in one call:
+
+```bash
+selfhub recall "what do you know about me?" --json
+```
+
 In console mode:
 
 - command mode accepts normal commands (`read`, `save`, `status`, ...)
