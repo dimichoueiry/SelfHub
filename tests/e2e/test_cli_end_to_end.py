@@ -17,3 +17,7 @@ def test_e2e_init_then_read(tmp_path: Path) -> None:
     )
     assert read.exit_code == 0
     assert "Profile" in read.stdout
+
+    status = runner.invoke(app, ["status", "--repo-path", str(repo_path), "--json"])
+    assert status.exit_code == 0
+    assert "\"branch\": \"main\"" in status.stdout
