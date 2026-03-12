@@ -1,90 +1,118 @@
 
+# SelfHub
+
+SelfHub is a CLI-first personal memory system.
+
+It helps you own your identity data in plain Markdown files inside a Git repo you control. You can save, read, search, recall, delete, and sync personal knowledge with full version history.
 
 https://github.com/user-attachments/assets/0bb198b5-0b00-4956-ac9e-37938251810f
 
+## What You Can Do Today
 
+- Onboard with a guided setup wizard (`selfhub setup`)
+- Save memory into structured or custom Markdown paths (`selfhub save`)
+- Read any memory file or folder (`selfhub read`)
+- Search and recall with lexical + semantic retrieval (`selfhub search`, `selfhub recall`)
+- Delete bad saved entries (`selfhub delete`)
+- Sync to GitHub with normal git history (`selfhub sync`)
+- Use an interactive console with command/chat modes (`selfhub console`)
 
-# SelfHub
+## Install And Run
 
-SelfHub is a CLI-first personal identity platform.
+Requirements:
 
-This repository currently contains **Phase 0 foundations**:
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/)
+- Git
 
-- Python uv workspace monorepo
-- `selfhub-core` shared domain package
-- `selfhub-cli` command package
-- CI, linting, typing, and test scaffolding
-
-## Monorepo Layout
-
-```text
-packages/
-  selfhub-core/      # domain contracts and shared logic
-  selfhub-cli/       # CLI entrypoint and command orchestration
-tests/
-  unit/
-  integration/
-  e2e/
-docs/
-.github/workflows/
-```
-
-## Quickstart (uv)
+Option A: Run from source (recommended for now)
 
 ```bash
+git clone https://github.com/dimichoueiry/SelfHub.git
+cd SelfHub
 uv venv
 source .venv/bin/activate
-uv sync --group dev --all-packages
-uv run pre-commit install
-uv run pytest
-uv run ruff check .
-uv run mypy packages
+uv sync --all-packages
+uv run selfhub --help
 ```
 
-## Save Classification Setup
-
-`selfhub save` uses a dedicated **thinking model** unless `--file` is provided.
-
-Custom folders/files are supported:
-
-- `selfhub read` and `selfhub search` include custom markdown files.
-- `selfhub save --file custom/notes.md "..."` creates and writes to custom paths.
-- LLM classification can route into existing custom markdown files.
-- Saves create git commits and push when a remote is configured.
-
-## Onboarding Wizard
-
-Run:
+Option B: Install as a local uv tool after cloning
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run selfhub setup
+cd SelfHub
+uv tool install --force --editable packages/selfhub-cli --with-editable packages/selfhub-core
+selfhub --help
 ```
 
-The wizard walks through:
+## First-Time Setup
 
-- local repo path selection
-- local/remote/GitHub bootstrap setup
-- thinking model setup (backend save intelligence)
-- chat model setup (interactive `/chat` mode)
-- keychain storage for GitHub/OpenRouter secrets when available
+Run the onboarding wizard:
 
-Thinking model overrides via env:
+```bash
+selfhub setup
+```
+
+The wizard configures:
+
+- local repo path
+- local/remote/GitHub repo wiring
+- thinking model (save classification and dedupe)
+- chat model (`/chat` mode in console)
+- key storage for GitHub/OpenRouter credentials when keychain is available
+
+## Core Commands
+
+```bash
+selfhub init
+selfhub setup
+selfhub save "I am building SelfHub"
+selfhub save --file preferences/coding-workflow.md "I like small, frequent commits."
+selfhub read
+selfhub read experiences/career.md
+selfhub search "what do i do for work?" --mode hybrid
+selfhub recall "what do you know about me?"
+selfhub delete --file experiences/career.md --contains "wrong text"
+selfhub sync
+selfhub log --file experiences/career.md
+```
+
+## Console Mode
+
+Start:
+
+```bash
+selfhub console
+```
+
+In console:
+
+- command mode accepts normal commands (`read`, `save`, `delete`, `search`, `recall`, `status`, ...)
+- `/chat` enters chat mode
+- `/unchat` returns to command mode
+- `/save <content>` saves immediately in chat mode
+- `/save --file <path> <content>` saves to a specific file in chat mode
+- `/tools` lists available CLI/slash tools
+- `/exit` exits console
+
+## Retrieval And Model Configuration
+
+Thinking model overrides:
 
 ```bash
 export SELFHUB_THINKING_PROVIDER=openrouter
-export OPENROUTER_API_KEY=...
 export SELFHUB_THINKING_MODEL=anthropic/claude-3.5-haiku
+export OPENROUTER_API_KEY=...
 ```
 
-Chat model overrides via env:
+Chat model overrides:
 
 ```bash
 export SELFHUB_CHAT_PROVIDER=ollama
-export OLLAMA_BASE_URL=http://localhost:11434
 export SELFHUB_CHAT_MODEL=qwen2.5:14b
+export OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-Semantic retrieval embeddings (for `search --mode semantic|hybrid` and `recall`):
+Semantic embedding overrides (`search --mode semantic|hybrid`, `recall`):
 
 ```bash
 export SELFHUB_EMBEDDING_PROVIDER=openrouter   # or ollama
@@ -93,50 +121,31 @@ export SELFHUB_EMBEDDING_MODEL=openai/text-embedding-3-small
 
 Notes:
 
-- If embedding vars are omitted, SelfHub falls back to thinking/chat provider defaults.
+- If embedding vars are not set, SelfHub falls back to thinking/chat defaults.
 - OpenRouter embeddings require `OPENROUTER_API_KEY`.
-- Ollama embeddings default model is `nomic-embed-text`.
+- Ollama embedding default is `nomic-embed-text`.
 
-## Console Mode
+## Agent Integration
 
-Run:
-
-```bash
-selfhub console
-```
-
-Discover available automation-friendly commands at any time:
+List tools and usage hints:
 
 ```bash
 selfhub tools
 ```
 
-Generate a strict agent contract (workflow + grounding rules):
+Generate a strict agent spec:
 
 ```bash
 selfhub agent-spec
 selfhub agent-spec --json
 ```
 
-Recall broad memory context in one call:
+## Development
 
 ```bash
-selfhub recall "what do you know about me?" --json
+uv sync --group dev --all-packages
+uv run pre-commit install
+uv run pytest
+uv run ruff check .
+uv run mypy packages tests
 ```
-
-In console mode:
-
-- command mode accepts normal commands (`read`, `save`, `delete`, `search`, `recall`, `status`, ...)
-- use `selfhub delete --file <path> --index <n>` to remove a bad saved bullet entry
-- `/tools` shows all CLI and slash tools available to the current session
-- `/chat` switches to conversational agent mode
-- `/unchat` returns to command mode
-- `/save <content>` in chat mode saves immediately
-- `/save --file <path> <content>` saves to an explicit file from chat mode
-- save suggestions support `1` save, `2` edit then save, `3` dismiss
-
-## Current Status
-
-- Phase 0: in progress
-- Commands are scaffolded and intentionally minimal.
-- Core product behavior from the PRD will be implemented incrementally in upcoming phases.
