@@ -19,8 +19,9 @@ def test_setup_wizard_local_skip(tmp_path: Path, monkeypatch: MonkeyPatch) -> No
     user_input = "\n".join(
         [
             str(repo_path),
-            "local",
-            "skip",
+            "1",
+            "3",
+            "y",
         ]
     )
 
