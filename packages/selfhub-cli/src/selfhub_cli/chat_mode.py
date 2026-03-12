@@ -135,13 +135,18 @@ def run_console(
             )
             continue
 
-        history.append(ChatMessage(role="user", content=text))
+        turn_messages = list(history)
+        memory_context = _build_memory_context(service, text)
+        if memory_context is not None:
+            turn_messages.append(ChatMessage(role="system", content=memory_context))
+        turn_messages.append(ChatMessage(role="user", content=text))
         try:
-            response = chat_client.reply(history)
+            response = chat_client.reply(turn_messages)
         except ChatModelError as exc:
             print(f"Chat model error: {exc}")
             continue
 
+        history.append(ChatMessage(role="user", content=text))
         print(response)
         history.append(ChatMessage(role="assistant", content=response))
 
@@ -248,6 +253,23 @@ def _extract_implicit_memory_candidate(text: str) -> str | None:
 def _extract_slash_save_payload(text: str) -> str | None:
     request = _extract_slash_save_request(text)
     return request.content if request is not None else None
+
+
+def _build_memory_context(service: SelfHubService, user_text: str) -> str | None:
+    query = user_text.strip()
+    if len(query) < 3:
+        return None
+    results = service.search(query=query, mode="hybrid", limit=4)
+    if not results:
+        return None
+
+    lines = [
+        "Relevant SelfHub memory snippets for this user request:",
+        "Use these facts when helpful. If uncertain, say you are unsure.",
+    ]
+    for index, result in enumerate(results, start=1):
+        lines.append(f"{index}. {result.path}: {result.excerpt}")
+    return "\n".join(lines)
 
 
 def _extract_slash_save_request(text: str) -> SlashSaveRequest | None:

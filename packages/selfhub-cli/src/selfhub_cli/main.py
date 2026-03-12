@@ -539,10 +539,11 @@ def log_command(
 def search_command(
     query: Annotated[str, typer.Argument(help="Search query")],
     mode: Annotated[str, typer.Option(help="Search mode: exact | semantic | hybrid")] = "hybrid",
+    limit: Annotated[int, typer.Option(help="Maximum number of ranked results")] = 8,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    results = _service(repo_path).search(query=query, mode=mode)
+    results = _service(repo_path).search(query=query, mode=mode, limit=limit)
     payload = {
         "success": True,
         "message": f"Found {len(results)} result(s)",

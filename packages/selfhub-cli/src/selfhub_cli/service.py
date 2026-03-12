@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -394,27 +395,109 @@ class SelfHubService:
             data={"commits": [entry.to_dict() for entry in entries]},
         )
 
-    def search(self, query: str, mode: str = "hybrid") -> list[SearchResult]:
+    def search(self, query: str, mode: str = "hybrid", limit: int = 8) -> list[SearchResult]:
         if mode not in {"exact", "semantic", "hybrid"}:
             raise ValueError("mode must be one of: exact, semantic, hybrid")
+        cleaned_query = query.strip()
+        if not cleaned_query:
+            return []
+        safe_limit = max(1, min(limit, 25))
 
+        query_terms = _tokenize(cleaned_query)
+        expanded_terms = _expand_terms(query_terms)
         results: list[SearchResult] = []
-        for path in self.repo_path.rglob("*.md"):
-            content = path.read_text(encoding="utf-8")
-            lower_content = content.lower()
-            lower_query = query.lower()
-            if lower_query in lower_content:
-                index = lower_content.index(lower_query)
-                excerpt = (
-                    content[max(0, index - 30) : index + len(query) + 30]
-                    .replace("\n", " ")
-                    .strip()
-                )
-                score = 1.0 if mode == "exact" else 0.85
-                rel_path = str(path.relative_to(self.repo_path))
-                results.append(SearchResult(path=f"/{rel_path}", excerpt=excerpt, score=score))
 
-        return sorted(results, key=lambda item: item.score, reverse=True)
+        for path in self.repo_path.rglob("*.md"):
+            if not path.is_file():
+                continue
+            content = path.read_text(encoding="utf-8")
+            rel_path = str(path.relative_to(self.repo_path))
+            match = self._best_match_for_file(
+                rel_path=rel_path,
+                content=content,
+                query=cleaned_query,
+                query_terms=query_terms,
+                expanded_terms=expanded_terms,
+                mode=mode,
+            )
+            if match is not None:
+                results.append(match)
+
+        return sorted(results, key=lambda item: item.score, reverse=True)[:safe_limit]
+
+    def _best_match_for_file(
+        self,
+        rel_path: str,
+        content: str,
+        query: str,
+        query_terms: set[str],
+        expanded_terms: set[str],
+        mode: str,
+    ) -> SearchResult | None:
+        lines = content.splitlines()
+        if not lines:
+            return None
+
+        query_lower = query.lower()
+        path_terms = _tokenize(rel_path.replace("/", " "))
+        path_overlap = _coverage(expanded_terms, path_terms)
+        best_score = 0.0
+        best_index: int | None = None
+
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            line_terms = _tokenize(stripped)
+            if not line_terms:
+                continue
+
+            exact_hit = bool(query_lower) and query_lower in stripped.lower()
+            term_coverage = _coverage(query_terms, line_terms)
+            expanded_coverage = _coverage(expanded_terms, line_terms)
+            density = _density(expanded_terms, line_terms)
+
+            if mode == "exact":
+                if not exact_hit:
+                    continue
+                score = 1.0
+            else:
+                lexical = (0.72 * term_coverage) + (0.18 * density) + (0.10 * path_overlap)
+                semantic = (0.55 * term_coverage) + (0.25 * expanded_coverage) + (
+                    0.20 * path_overlap
+                )
+                if exact_hit:
+                    lexical = max(lexical, 0.98)
+                    semantic = min(1.0, semantic + 0.20)
+                score = semantic if mode == "semantic" else max(lexical, semantic)
+
+                if mode == "semantic":
+                    if not exact_hit and expanded_coverage < 0.20 and path_overlap < 0.20:
+                        continue
+                if mode == "hybrid":
+                    if not exact_hit and term_coverage < 0.20 and expanded_coverage < 0.20:
+                        continue
+
+            if score > best_score:
+                best_score = min(score, 1.0)
+                best_index = index
+
+        # Path-aware fallback: if query maps to a category (e.g., "work" -> career), return
+        # the latest content line from that file even if direct term overlap is weak.
+        if best_index is None and mode in {"semantic", "hybrid"} and path_overlap >= 0.20:
+            fallback_index = _latest_content_line_index(lines)
+            if fallback_index is None:
+                return None
+            best_index = fallback_index
+            best_score = min(0.35 + (0.30 * path_overlap), 0.70)
+
+        if best_index is None:
+            return None
+
+        excerpt = _excerpt_around(lines, best_index)
+        if not excerpt:
+            return None
+        return SearchResult(path=f"/{rel_path}", excerpt=excerpt, score=best_score)
 
     def _ensure_local_repo(self, remote_url: str | None) -> bool:
         if remote_url:
@@ -559,3 +642,66 @@ class SelfHubService:
                     break
         summary = first_line if first_line else "(empty)"
         return f"{relative}: {summary}"
+
+
+_SYNONYM_MAP: dict[str, set[str]] = {
+    "work": {"career", "job", "profession", "role"},
+    "career": {"work", "job", "profession", "role"},
+    "job": {"work", "career", "profession", "role"},
+    "favorite": {"prefer", "like", "love"},
+    "prefer": {"favorite", "like", "love"},
+    "style": {"voice", "tone", "writing"},
+    "writing": {"style", "voice", "tone"},
+    "voice": {"style", "tone", "writing"},
+    "color": {"colour"},
+    "colour": {"color"},
+    "hobby": {"hobbies", "interest", "interests"},
+    "hobbies": {"hobby", "interest", "interests"},
+}
+
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9'_-]*")
+
+
+def _tokenize(text: str) -> set[str]:
+    return {match.group(0).lower() for match in _TOKEN_RE.finditer(text)}
+
+
+def _expand_terms(terms: set[str]) -> set[str]:
+    expanded = set(terms)
+    for term in terms:
+        expanded.update(_SYNONYM_MAP.get(term, set()))
+    return expanded
+
+
+def _coverage(query_terms: set[str], target_terms: set[str]) -> float:
+    if not query_terms:
+        return 0.0
+    return len(query_terms & target_terms) / len(query_terms)
+
+
+def _density(query_terms: set[str], target_terms: set[str]) -> float:
+    if not target_terms:
+        return 0.0
+    return len(query_terms & target_terms) / len(target_terms)
+
+
+def _latest_content_line_index(lines: list[str]) -> int | None:
+    for index in range(len(lines) - 1, -1, -1):
+        stripped = lines[index].strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            continue
+        return index
+    return None
+
+
+def _excerpt_around(lines: list[str], center: int, radius: int = 1) -> str:
+    start = max(0, center - radius)
+    end = min(len(lines), center + radius + 1)
+    parts = [lines[i].strip() for i in range(start, end) if lines[i].strip()]
+    excerpt = " ".join(parts)
+    excerpt = re.sub(r"\s+", " ", excerpt).strip()
+    if len(excerpt) <= 280:
+        return excerpt
+    return f"{excerpt[:277].rstrip()}..."

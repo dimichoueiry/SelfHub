@@ -37,8 +37,24 @@ def test_search_finds_saved_content(tmp_path: Path) -> None:
     service.save("I prefer deep work at night", file_path="preferences/lifestyle.md")
     results = service.search("deep work", mode="hybrid")
 
-    assert len(results) == 1
+    assert len(results) >= 1
     assert results[0].path == "/preferences/lifestyle.md"
+
+
+def test_search_semantic_understands_work_to_career(tmp_path: Path) -> None:
+    repo_path = tmp_path / "selfhub"
+    service = SelfHubService(repo_path)
+    service.init_repo()
+
+    service.save(
+        "I build payments systems for fintech companies",
+        file_path="experiences/career.md",
+    )
+    results = service.search("What do I do for work?", mode="semantic")
+
+    assert len(results) >= 1
+    assert results[0].path == "/experiences/career.md"
+    assert "payments systems" in results[0].excerpt
 
 
 def test_status_and_sync_without_remote(tmp_path: Path) -> None:

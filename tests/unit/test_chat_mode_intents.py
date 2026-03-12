@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from selfhub_cli.chat_mode import (
+    _build_memory_context,
     _extract_explicit_save_payload,
     _extract_implicit_memory_candidate,
     _extract_slash_save_payload,
@@ -9,6 +12,7 @@ from selfhub_cli.chat_mode import (
     _is_save_choice_one,
     _is_save_choice_two,
 )
+from selfhub_cli.service import SelfHubService
 
 
 def test_extract_explicit_save_payload_with_separator() -> None:
@@ -56,3 +60,15 @@ def test_save_choice_shortcuts() -> None:
     assert _is_save_choice_one("1")
     assert _is_save_choice_two("2")
     assert _is_dismiss_save("3")
+
+
+def test_build_memory_context_returns_relevant_hits(tmp_path: Path) -> None:
+    repo_path = tmp_path / "selfhub"
+    service = SelfHubService(repo_path)
+    service.init_repo()
+    service.save("My favorite color is teal", file_path="preferences/lifestyle.md")
+
+    context = _build_memory_context(service, "What's my favorite color?")
+    assert context is not None
+    assert "/preferences/lifestyle.md" in context
+    assert "favorite color is teal" in context.lower()
