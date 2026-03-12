@@ -4,8 +4,13 @@ import shlex
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from rich.console import Console
+from rich.panel import Panel
+
 from selfhub_cli.chat_models import ChatClient, ChatMessage, ChatModelError
 from selfhub_cli.service import SelfHubService
+
+console = Console()
 
 
 @dataclass(slots=True)
@@ -129,12 +134,13 @@ def run_console(
             continue
 
         if chat_client is None:
-            print(
+            _print_notice(
                 "No chat model configured. Run `selfhub setup` and configure a chat model, "
-                "or switch to command mode with /unchat."
+                "or switch to command mode with /unchat.",
             )
             continue
 
+        _print_chat_turn("You", text, border_style="cyan")
         turn_messages = list(history)
         memory_context = _build_memory_context(service, text)
         if memory_context is not None:
@@ -147,7 +153,7 @@ def run_console(
             continue
 
         history.append(ChatMessage(role="user", content=text))
-        print(response)
+        _print_chat_turn("SelfHub", response, border_style="green")
         history.append(ChatMessage(role="assistant", content=response))
 
         candidate = _extract_implicit_memory_candidate(text)
@@ -353,8 +359,42 @@ def _print_console_help(mode: str) -> None:
 
 
 def _print_save_suggestion_card(content: str) -> None:
-    print("\nSave suggestion:")
-    print(f"  \"{content}\"")
-    print("  [1] Save")
-    print("  [2] Edit then save")
-    print("  [3] Dismiss")
+    text = "\n".join(
+        [
+            f"\"{content}\"",
+            "",
+            "[1] Save",
+            "[2] Edit then save",
+            "[3] Dismiss",
+        ]
+    )
+    console.print(
+        Panel(
+            text,
+            title="Save suggestion",
+            border_style="yellow",
+            padding=(0, 1),
+        )
+    )
+
+
+def _print_chat_turn(label: str, content: str, border_style: str) -> None:
+    console.print(
+        Panel(
+            content.strip(),
+            title=label,
+            border_style=border_style,
+            padding=(0, 1),
+        )
+    )
+
+
+def _print_notice(message: str) -> None:
+    console.print(
+        Panel(
+            message,
+            title="Notice",
+            border_style="magenta",
+            padding=(0, 1),
+        )
+    )
