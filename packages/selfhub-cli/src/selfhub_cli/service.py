@@ -53,6 +53,7 @@ class SelfHubService:
         remote_url: str | None = None,
         github_owner: str | None = None,
         github_token_env: str = "GITHUB_TOKEN",
+        github_token: str | None = None,
         bootstrap_github: bool = False,
     ) -> CommandResult:
         resolved_remote = remote_url
@@ -63,7 +64,7 @@ class SelfHubService:
                     success=False,
                     message="GitHub bootstrap requires --github-owner.",
                 )
-            token = os.getenv(github_token_env)
+            token = github_token or os.getenv(github_token_env)
             if not token:
                 return CommandResult(
                     success=False,

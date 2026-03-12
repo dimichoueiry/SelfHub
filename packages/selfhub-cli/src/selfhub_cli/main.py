@@ -7,7 +7,15 @@ from typing import Annotated
 
 import typer
 
+from selfhub_cli.runtime import resolve_repo_path, resolve_save_intelligence
+from selfhub_cli.secrets import (
+    SECRET_GITHUB_TOKEN,
+    SECRET_OPENROUTER_API_KEY,
+    KeyringSecretStore,
+    SecretStoreError,
+)
 from selfhub_cli.service import SelfHubService
+from selfhub_cli.settings import load_settings, save_settings
 
 app = typer.Typer(help="SelfHub CLI")
 
@@ -24,8 +32,10 @@ def _emit(payload: dict[str, object], as_json: bool) -> None:
 
 
 def _service(repo_path: Path | None) -> SelfHubService:
-    root = repo_path or Path.home() / "selfhub"
-    return SelfHubService(root)
+    settings = load_settings()
+    root = resolve_repo_path(repo_path, settings)
+    intelligence = resolve_save_intelligence(settings)
+    return SelfHubService(root, save_intelligence=intelligence)
 
 
 @app.command("init")
@@ -48,6 +58,125 @@ def init_command(
         bootstrap_github=bootstrap_github,
     )
     _emit(result.to_dict(), as_json)
+
+
+@app.command("setup")
+def setup_command(
+    as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
+) -> None:
+    settings = load_settings()
+    typer.echo("SelfHub setup wizard")
+    typer.echo("This wizard configures your local repo and model provider.")
+
+    default_path = str(resolve_repo_path(None, settings))
+    repo_input = typer.prompt("Local SelfHub path", default=default_path).strip()
+    repo_path = Path(repo_input).expanduser()
+
+    setup_mode = typer.prompt(
+        "Repo setup mode [local|remote|github]",
+        default="github" if settings.github_owner else "local",
+    ).strip().lower()
+    if setup_mode not in {"local", "remote", "github"}:
+        typer.echo("Invalid setup mode. Use local, remote, or github.")
+        raise typer.Exit(code=1)
+
+    remote_url: str | None = None
+    github_owner: str | None = settings.github_owner
+    github_token: str | None = None
+
+    if setup_mode == "remote":
+        remote_url = typer.prompt("Remote URL (SSH or HTTPS)").strip()
+    elif setup_mode == "github":
+        github_owner = typer.prompt(
+            "GitHub owner (username or org)",
+            default=settings.github_owner or "",
+        ).strip()
+        if not github_owner:
+            typer.echo("GitHub owner is required for github bootstrap.")
+            raise typer.Exit(code=1)
+        github_token = _resolve_or_prompt_secret(
+            secret_name=SECRET_GITHUB_TOKEN,
+            prompt_label="GitHub token",
+        )
+        if github_token is None:
+            typer.echo("GitHub token is required for github bootstrap.")
+            raise typer.Exit(code=1)
+        _store_secret(SECRET_GITHUB_TOKEN, github_token)
+
+    service = SelfHubService(repo_path)
+    init_result = service.init_repo(
+        remote_url=remote_url,
+        github_owner=github_owner,
+        github_token=github_token,
+        bootstrap_github=(setup_mode == "github"),
+    )
+    if not init_result.success:
+        _emit(init_result.to_dict(), as_json)
+        raise typer.Exit(code=1)
+
+    model_choice = typer.prompt(
+        "Model provider [openrouter|ollama|skip]",
+        default=settings.llm_provider or "skip",
+    ).strip().lower()
+    if model_choice not in {"openrouter", "ollama", "skip"}:
+        typer.echo("Invalid model provider. Use openrouter, ollama, or skip.")
+        raise typer.Exit(code=1)
+
+    configured_provider: str | None = None
+    configured_model: str | None = None
+    configured_ollama_url: str | None = None
+    key_saved = False
+
+    if model_choice == "openrouter":
+        configured_provider = "openrouter"
+        configured_model = typer.prompt(
+            "OpenRouter model",
+            default=settings.llm_model or "anthropic/claude-3.5-haiku",
+        ).strip()
+        openrouter_key = _resolve_or_prompt_secret(
+            secret_name=SECRET_OPENROUTER_API_KEY,
+            prompt_label="OpenRouter API key",
+        )
+        if openrouter_key:
+            key_saved = _store_secret(SECRET_OPENROUTER_API_KEY, openrouter_key)
+    elif model_choice == "ollama":
+        configured_provider = "ollama"
+        configured_model = typer.prompt(
+            "Ollama model",
+            default=settings.llm_model or "llama3.1:8b",
+        ).strip()
+        configured_ollama_url = typer.prompt(
+            "Ollama base URL",
+            default=settings.ollama_base_url or "http://localhost:11434",
+        ).strip().rstrip("/")
+
+    settings.repo_path = str(repo_path)
+    settings.github_owner = github_owner
+    settings.llm_provider = configured_provider
+    settings.llm_model = configured_model
+    settings.ollama_base_url = configured_ollama_url
+    config_file = save_settings(settings)
+
+    health_service = SelfHubService(
+        repo_path,
+        save_intelligence=resolve_save_intelligence(settings),
+    )
+    status_result = health_service.status()
+
+    payload = {
+        "success": True,
+        "message": "Setup complete.",
+        "data": {
+            "config_path": str(config_file),
+            "repo_path": str(repo_path),
+            "setup_mode": setup_mode,
+            "model_provider": configured_provider,
+            "model": configured_model,
+            "key_saved": key_saved,
+            "status": status_result.data,
+        },
+    }
+    _emit(payload, as_json)
 
 
 @app.command("save")
@@ -179,3 +308,48 @@ def search_command(
 
 def main() -> None:
     app()
+
+
+def _resolve_or_prompt_secret(secret_name: str, prompt_label: str) -> str | None:
+    store = _load_secret_store()
+    existing: str | None = None
+    if store is not None:
+        try:
+            existing = store.get_secret(secret_name)
+        except SecretStoreError:
+            existing = None
+
+    if existing:
+        use_existing = typer.confirm(
+            f"Use existing {prompt_label} from keychain?",
+            default=True,
+        )
+        if use_existing:
+            return existing
+
+    entered_value = typer.prompt(f"{prompt_label}", hide_input=True)
+    entered = str(entered_value).strip()
+    if not entered:
+        return None
+    return entered
+
+
+def _store_secret(secret_name: str, value: str) -> bool:
+    store = _load_secret_store()
+    if store is None:
+        typer.echo(
+            "Warning: keychain unavailable. Set this key in environment variables for now.",
+        )
+        return False
+    try:
+        store.set_secret(secret_name, value)
+        return True
+    except SecretStoreError:
+        typer.echo(
+            "Warning: failed to store secret in keychain. Use environment variables as fallback.",
+        )
+        return False
+
+
+def _load_secret_store() -> KeyringSecretStore | None:
+    return KeyringSecretStore()

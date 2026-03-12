@@ -39,6 +39,21 @@ uv run mypy packages
 
 `selfhub save` uses LLM classification unless `--file` is provided.
 
+## Onboarding Wizard
+
+Run:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run selfhub setup
+```
+
+The wizard walks through:
+
+- local repo path selection
+- local/remote/GitHub bootstrap setup
+- provider setup (`openrouter`, `ollama`, or `skip`)
+- keychain storage for GitHub/OpenRouter secrets when available
+
 OpenRouter:
 
 ```bash
