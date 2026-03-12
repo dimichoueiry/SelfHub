@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from selfhub_core import DEFAULT_DIRECTORIES, DEFAULT_MARKDOWN_FILES, REPO_NAME
@@ -23,11 +25,28 @@ from selfhub_core.git_ops import (
     stage_all,
 )
 from selfhub_core.github_api import GitHubApiError, GitHubBootstrapClient
+from selfhub_core.save_intelligence import (
+    DuplicateDecision,
+    SaveIntelligence,
+    SaveIntelligenceError,
+    build_default_save_intelligence,
+)
+
+
+@dataclass(slots=True)
+class ParsedEntry:
+    line_index: int
+    text: str
 
 
 class SelfHubService:
-    def __init__(self, repo_path: Path) -> None:
+    def __init__(
+        self,
+        repo_path: Path,
+        save_intelligence: SaveIntelligence | None = None,
+    ) -> None:
         self.repo_path = repo_path
+        self.save_intelligence = save_intelligence or build_default_save_intelligence()
 
     def init_repo(
         self,
@@ -78,20 +97,179 @@ class SelfHubService:
             message = f"{message}. {push_note}"
         return CommandResult(success=True, message=message, data=details)
 
-    def save(self, content: str, file_path: str | None = None) -> SaveResult:
-        target_rel = file_path or "meta/profile.md"
-        target = self.repo_path / target_rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        prefix = "\n- " if target.exists() else ""
-        with target.open("a", encoding="utf-8") as handle:
-            handle.write(f"{prefix}{content}\n")
-        return SaveResult(
-            success=True,
-            message="Saved content locally.",
-            file_path=f"/{target_rel}",
-            commit_sha=None,
-            action_taken="append",
+    def save(
+        self,
+        content: str,
+        file_path: str | None = None,
+        tool_name: str = "SelfHub CLI",
+        on_duplicate: str | None = None,
+        classification_threshold: float = 0.80,
+    ) -> SaveResult:
+        if not is_git_repo(self.repo_path):
+            return SaveResult(
+                success=False,
+                message=(
+                    f"No git repository found at {self.repo_path}. "
+                    "Run 'selfhub init' first."
+                ),
+            )
+
+        duplicate_mode = (on_duplicate or "").strip().lower()
+        if duplicate_mode and duplicate_mode not in {"add", "update"}:
+            return SaveResult(
+                success=False,
+                message="Invalid --on-duplicate value. Use 'add' or 'update'.",
+            )
+
+        try:
+            self._sync_before_write()
+        except GitCommandError as exc:
+            return SaveResult(success=False, message=str(exc), data={"stderr": exc.stderr})
+
+        resolved_target = file_path.lstrip("/") if file_path else None
+        action = "append"
+        classification: dict[str, object] | None = None
+
+        if resolved_target is None:
+            if self.save_intelligence is None:
+                return SaveResult(
+                    success=False,
+                    message=(
+                        "No LLM provider configured for classification. "
+                        "Set SELFHUB_LLM_PROVIDER=openrouter|ollama and required env vars, "
+                        "or pass --file."
+                    ),
+                )
+
+            try:
+                decision = self.save_intelligence.classify(
+                    content=content,
+                    allowed_files=list(DEFAULT_MARKDOWN_FILES.keys()),
+                )
+            except SaveIntelligenceError as exc:
+                return SaveResult(success=False, message=str(exc))
+
+            classification = {
+                "target_file": decision.target_file,
+                "confidence": decision.confidence,
+                "action": decision.action,
+                "reason": decision.reason,
+            }
+
+            if decision.confidence < classification_threshold:
+                return SaveResult(
+                    success=False,
+                    message=(
+                        f"Low classification confidence ({decision.confidence:.2f}). "
+                        "Choose a target file."
+                    ),
+                    action_taken="needs_target_confirmation",
+                    data={
+                        "needs_target_confirmation": True,
+                        "suggested_file": decision.target_file,
+                        "confidence": decision.confidence,
+                        "reason": decision.reason,
+                        "allowed_files": sorted(DEFAULT_MARKDOWN_FILES.keys()),
+                    },
+                )
+
+            resolved_target = decision.target_file
+            action = decision.action
+
+        assert resolved_target is not None
+
+        safe_target = self._safe_target_path(resolved_target)
+        if safe_target is None:
+            return SaveResult(success=False, message="Invalid target file path.")
+
+        safe_target.parent.mkdir(parents=True, exist_ok=True)
+        if not safe_target.exists() and resolved_target in DEFAULT_MARKDOWN_FILES:
+            safe_target.write_text(DEFAULT_MARKDOWN_FILES[resolved_target], encoding="utf-8")
+
+        parsed_entries = self._parse_entries(safe_target)
+        duplicate_decision = self._check_duplicate(
+            content=content,
+            target_file=resolved_target,
+            parsed_entries=parsed_entries,
         )
+        if isinstance(duplicate_decision, SaveResult):
+            return duplicate_decision
+
+        if duplicate_decision.is_duplicate and duplicate_mode == "":
+            return SaveResult(
+                success=False,
+                message="Potential duplicate detected. Choose add or update.",
+                file_path=f"/{resolved_target}",
+                action_taken="needs_duplicate_resolution",
+                data={
+                    "needs_duplicate_resolution": True,
+                    "target_file": resolved_target,
+                    "existing_entry": duplicate_decision.existing_entry,
+                    "confidence": duplicate_decision.confidence,
+                    "reason": duplicate_decision.reason,
+                    "suggested_action": "update",
+                },
+            )
+
+        timestamp = datetime.now(tz=UTC).replace(microsecond=0).isoformat()
+        formatted_entry = f"- {content.strip()} (saved {timestamp} via {tool_name})"
+
+        if duplicate_decision.is_duplicate and duplicate_mode == "update":
+            wrote = self._update_entry(
+                target=safe_target,
+                existing_text=duplicate_decision.existing_entry,
+                replacement=formatted_entry,
+            )
+            if not wrote:
+                self._append_entry(target=safe_target, entry=formatted_entry)
+                action = "append"
+            else:
+                action = "update"
+        else:
+            self._append_entry(target=safe_target, entry=formatted_entry)
+            action = "append"
+
+        try:
+            stage_all(self.repo_path)
+            if not has_staged_changes(self.repo_path):
+                return SaveResult(
+                    success=True,
+                    message=f"No changes detected for /{resolved_target}.",
+                    file_path=f"/{resolved_target}",
+                    commit_sha=current_head(self.repo_path),
+                    action_taken=action,
+                    data={"classification": classification},
+                )
+
+            commit_sha = commit(self.repo_path, f"[SelfHub] {action} via {tool_name}")
+
+            push_warning: str | None = None
+            if has_remote(self.repo_path):
+                try:
+                    push(self.repo_path, set_upstream=not has_upstream(self.repo_path))
+                except GitCommandError:
+                    push_warning = "Saved locally; remote push failed. Run 'selfhub sync' later."
+
+            message = f"Saved to /{resolved_target}."
+            if push_warning:
+                message = f"{message} {push_warning}"
+
+            return SaveResult(
+                success=True,
+                message=message,
+                file_path=f"/{resolved_target}",
+                commit_sha=commit_sha,
+                action_taken=action,
+                data={
+                    "classification": classification,
+                    "duplicate_check": {
+                        "is_duplicate": duplicate_decision.is_duplicate,
+                        "confidence": duplicate_decision.confidence,
+                    },
+                },
+            )
+        except GitCommandError as exc:
+            return SaveResult(success=False, message=str(exc), data={"stderr": exc.stderr})
 
     def read(self, target: str | None = None) -> CommandResult:
         if not self.repo_path.exists():
@@ -291,6 +469,69 @@ class SelfHubService:
         except GitCommandError:
             return "Initialized locally, but remote push failed. Run 'selfhub sync' later."
         return None
+
+    def _sync_before_write(self) -> None:
+        if has_remote(self.repo_path) and has_upstream(self.repo_path):
+            status = get_status(self.repo_path)
+            if status.behind > 0:
+                pull(self.repo_path)
+
+    def _safe_target_path(self, rel_path: str) -> Path | None:
+        candidate = (self.repo_path / rel_path).resolve()
+        repo_root = self.repo_path.resolve()
+        if not str(candidate).startswith(str(repo_root)):
+            return None
+        return candidate
+
+    def _parse_entries(self, target: Path) -> list[ParsedEntry]:
+        if not target.exists():
+            return []
+        lines = target.read_text(encoding="utf-8").splitlines()
+        entries: list[ParsedEntry] = []
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                entries.append(ParsedEntry(line_index=index, text=stripped[2:].strip()))
+        return entries
+
+    def _check_duplicate(
+        self,
+        content: str,
+        target_file: str,
+        parsed_entries: list[ParsedEntry],
+    ) -> DuplicateDecision | SaveResult:
+        if self.save_intelligence is None or not parsed_entries:
+            return DuplicateDecision(is_duplicate=False, confidence=0.0)
+
+        existing_values = [entry.text for entry in parsed_entries]
+        try:
+            return self.save_intelligence.detect_duplicate(
+                content=content,
+                existing_entries=existing_values,
+                target_file=target_file,
+            )
+        except SaveIntelligenceError as exc:
+            return SaveResult(success=False, message=str(exc))
+
+    def _update_entry(self, target: Path, existing_text: str | None, replacement: str) -> bool:
+        if existing_text is None:
+            return False
+
+        lines = target.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("- ") and stripped[2:].strip() == existing_text:
+                lines[index] = replacement
+                new_content = "\n".join(lines)
+                target.write_text(f"{new_content}\n", encoding="utf-8")
+                return True
+        return False
+
+    def _append_entry(self, target: Path, entry: str) -> None:
+        current = target.read_text(encoding="utf-8") if target.exists() else ""
+        if current and not current.endswith("\n"):
+            current = f"{current}\n"
+        target.write_text(f"{current}{entry}\n", encoding="utf-8")
 
     def _markdown_files(self, base_path: Path) -> list[Path]:
         return sorted(path for path in base_path.rglob("*.md") if path.is_file())

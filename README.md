@@ -35,6 +35,26 @@ uv run ruff check .
 uv run mypy packages
 ```
 
+## Save Classification Setup
+
+`selfhub save` uses LLM classification unless `--file` is provided.
+
+OpenRouter:
+
+```bash
+export SELFHUB_LLM_PROVIDER=openrouter
+export OPENROUTER_API_KEY=...
+export SELFHUB_LLM_MODEL=anthropic/claude-3.5-haiku
+```
+
+Ollama:
+
+```bash
+export SELFHUB_LLM_PROVIDER=ollama
+export OLLAMA_BASE_URL=http://localhost:11434
+export SELFHUB_LLM_MODEL=llama3.1:8b
+```
+
 ## Current Status
 
 - Phase 0: in progress

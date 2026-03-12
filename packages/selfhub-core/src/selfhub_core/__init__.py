@@ -14,6 +14,13 @@ from selfhub_core.repo_layout import (
     all_standard_paths,
     resolve_default_repo_path,
 )
+from selfhub_core.save_intelligence import (
+    ClassificationDecision,
+    DuplicateDecision,
+    SaveIntelligence,
+    SaveIntelligenceError,
+    build_default_save_intelligence,
+)
 
 __all__ = [
     "CommandResult",
@@ -29,4 +36,9 @@ __all__ = [
     "GitCommandError",
     "GitHubApiError",
     "GitHubBootstrapClient",
+    "ClassificationDecision",
+    "DuplicateDecision",
+    "SaveIntelligence",
+    "SaveIntelligenceError",
+    "build_default_save_intelligence",
 ]
