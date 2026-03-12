@@ -13,6 +13,12 @@ class PendingSave:
     content: str
 
 
+@dataclass(slots=True)
+class SlashSaveRequest:
+    content: str
+    file_path: str | None = None
+
+
 def run_console(
     service: SelfHubService,
     execute_command: Callable[[list[str]], int],
@@ -54,6 +60,9 @@ def run_console(
                 mode = "chat"
                 _print_chat_mode_intro(chat_client is not None)
                 continue
+            if lower.startswith("/save"):
+                print("Use /chat first, then /save in chat mode.")
+                continue
             if lower == "/help":
                 _print_console_help(mode)
                 continue
@@ -80,10 +89,33 @@ def run_console(
         if lower == "/chat":
             print("Already in chat mode.")
             continue
+        if lower.startswith("/save"):
+            request = _extract_slash_save_request(text)
+            if request is None:
+                if pending is not None:
+                    _save_with_resolution(service, pending.content)
+                    pending = None
+                    continue
+                print("Usage: /save [--file <path>] <content>")
+                continue
+            _save_with_resolution(
+                service,
+                request.content,
+                file_path=request.file_path,
+            )
+            continue
 
         if pending is not None:
-            if _is_affirmative_save(lower):
+            if _is_save_choice_one(lower):
                 _save_with_resolution(service, pending.content)
+                pending = None
+                continue
+            if _is_save_choice_two(lower):
+                edited = input("Edit memory before save: ").strip()
+                if edited:
+                    _save_with_resolution(service, edited)
+                else:
+                    print("Edit canceled; nothing saved.")
                 pending = None
                 continue
             if _is_dismiss_save(lower):
@@ -116,14 +148,15 @@ def run_console(
         candidate = _extract_implicit_memory_candidate(text)
         if candidate is not None:
             pending = PendingSave(content=candidate)
-            print(
-                "\nMemory candidate detected. "
-                "Type `yes save that` to save, `dismiss` to skip, or continue chatting."
-            )
+            _print_save_suggestion_card(candidate)
 
 
-def _save_with_resolution(service: SelfHubService, content: str) -> None:
-    result = service.save(content=content)
+def _save_with_resolution(
+    service: SelfHubService,
+    content: str,
+    file_path: str | None = None,
+) -> None:
+    result = service.save(content=content, file_path=file_path)
 
     while True:
         if result.success:
@@ -212,8 +245,44 @@ def _extract_implicit_memory_candidate(text: str) -> str | None:
     return None
 
 
-def _is_affirmative_save(lowered: str) -> bool:
+def _extract_slash_save_payload(text: str) -> str | None:
+    request = _extract_slash_save_request(text)
+    return request.content if request is not None else None
+
+
+def _extract_slash_save_request(text: str) -> SlashSaveRequest | None:
+    stripped = text.strip()
+    if not stripped.lower().startswith("/save"):
+        return None
+
+    try:
+        parts = shlex.split(stripped)
+    except ValueError:
+        return None
+    if not parts:
+        return None
+
+    file_path: str | None = None
+    index = 1
+    if index < len(parts) and parts[index] == "--file":
+        index += 1
+        if index >= len(parts):
+            return None
+        file_path = parts[index]
+        index += 1
+
+    if index >= len(parts):
+        return None
+    content = " ".join(parts[index:]).strip()
+    if not content:
+        return None
+
+    return SlashSaveRequest(content=content, file_path=file_path)
+
+
+def _is_save_choice_one(lowered: str) -> bool:
     return lowered in {
+        "1",
         "yes",
         "yes save",
         "yes save that",
@@ -223,8 +292,12 @@ def _is_affirmative_save(lowered: str) -> bool:
     }
 
 
+def _is_save_choice_two(lowered: str) -> bool:
+    return lowered in {"2", "edit", "edit then save"}
+
+
 def _is_dismiss_save(lowered: str) -> bool:
-    return lowered in {"dismiss", "no", "no thanks", "skip"}
+    return lowered in {"3", "dismiss", "no", "no thanks", "skip"}
 
 
 def _print_console_intro() -> None:
@@ -238,6 +311,7 @@ def _print_chat_mode_intro(chat_ready: bool) -> None:
     print("Switched to chat mode.")
     print("- /unchat to return to command mode")
     print("- /exit to quit")
+    print("- /save <content> to save immediately")
     if not chat_ready:
         print("- No chat model configured yet. You can still use save-detection commands.")
 
@@ -253,6 +327,15 @@ def _print_console_help(mode: str) -> None:
     print("Chat mode help:")
     print("- Talk naturally with your configured chat model")
     print("- Say things like 'save this: ...' for explicit saves")
-    print("- Use 'yes save that' when a memory candidate appears")
+    print("- Use /save <content> for direct save from chat mode")
+    print("- For save suggestions: 1=save, 2=edit then save, 3=dismiss")
     print("- /unchat to return to command mode")
     print("- /exit to quit")
+
+
+def _print_save_suggestion_card(content: str) -> None:
+    print("\nSave suggestion:")
+    print(f"  \"{content}\"")
+    print("  [1] Save")
+    print("  [2] Edit then save")
+    print("  [3] Dismiss")

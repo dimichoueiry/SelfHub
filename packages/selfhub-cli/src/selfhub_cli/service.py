@@ -136,8 +136,9 @@ class SelfHubService:
                 return SaveResult(
                     success=False,
                     message=(
-                        "No LLM provider configured for classification. "
-                        "Set SELFHUB_LLM_PROVIDER=openrouter|ollama and required env vars, "
+                        "No thinking model configured for classification. "
+                        "Set SELFHUB_THINKING_PROVIDER=openrouter|ollama (or legacy "
+                        "SELFHUB_LLM_PROVIDER) and required env vars, "
                         "or pass --file."
                     ),
                 )
