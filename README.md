@@ -91,8 +91,9 @@ In console mode:
 - command mode accepts normal commands (`read`, `save`, `status`, ...)
 - `/chat` switches to conversational agent mode
 - `/unchat` returns to command mode
-- chat mode supports explicit save intents like `save this: ...` and `yes save that`
-```
+- `/save <content>` in chat mode saves immediately
+- `/save --file <path> <content>` saves to an explicit file from chat mode
+- save suggestions support `1` save, `2` edit then save, `3` dismiss
 
 ## Current Status
 
