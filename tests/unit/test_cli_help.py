@@ -1,0 +1,11 @@
+from selfhub_cli.main import app
+from typer.testing import CliRunner
+
+
+def test_cli_help_contains_commands() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "init" in result.stdout
+    assert "save" in result.stdout
+    assert "search" in result.stdout

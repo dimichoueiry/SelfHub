@@ -1,0 +1,45 @@
+[project]
+name = "selfhub-workspace"
+version = "0.1.0"
+description = "SelfHub monorepo workspace configuration"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.15.0",
+  "pre-commit>=3.8.0",
+  "pytest>=8.3.0",
+  "ruff>=0.11.0",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+selfhub-core = { workspace = true }
+selfhub-cli = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+mypy_path = ["packages/selfhub-core/src", "packages/selfhub-cli/src"]
+
+[[tool.mypy.overrides]]
+module = ["typer", "typer.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

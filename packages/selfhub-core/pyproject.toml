@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "selfhub-core"
+version = "0.1.0"
+description = "Core domain contracts and logic for SelfHub"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "SelfHub" }]
+license = { text = "MIT" }
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/selfhub_core"]
