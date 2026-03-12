@@ -10,3 +10,4 @@ def test_cli_help_contains_commands() -> None:
     assert "save" in result.stdout
     assert "search" in result.stdout
     assert "setup" in result.stdout
+    assert "console" in result.stdout

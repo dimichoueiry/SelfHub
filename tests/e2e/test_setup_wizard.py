@@ -21,6 +21,7 @@ def test_setup_wizard_local_skip(tmp_path: Path, monkeypatch: MonkeyPatch) -> No
             str(repo_path),
             "1",
             "3",
+            "3",
             "y",
         ]
     )
@@ -32,5 +33,6 @@ def test_setup_wizard_local_skip(tmp_path: Path, monkeypatch: MonkeyPatch) -> No
 
     loaded = load_settings()
     assert loaded.repo_path == str(repo_path)
-    assert loaded.llm_provider is None
+    assert loaded.thinking_provider is None
+    assert loaded.chat_provider is None
     assert (repo_path / "meta/profile.md").exists()
