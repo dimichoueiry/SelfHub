@@ -27,6 +27,15 @@ def test_extract_explicit_save_payload_without_separator() -> None:
     assert payload == "I prefer quiet offices"
 
 
+def test_extract_explicit_save_payload_ignores_earlier_hyphens() -> None:
+    text = (
+        "openlearn-architecture-builder -- open source project. "
+        "no just save that information"
+    )
+    payload = _extract_explicit_save_payload(text)
+    assert payload == "information"
+
+
 def test_extract_implicit_memory_candidate_detects_event() -> None:
     text = "I had surgery yesterday and now I need to rest."
     candidate = _extract_implicit_memory_candidate(text)

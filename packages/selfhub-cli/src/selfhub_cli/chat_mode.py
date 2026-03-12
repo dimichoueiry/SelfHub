@@ -209,18 +209,15 @@ def _extract_explicit_save_payload(text: str) -> str | None:
     if not any(trigger in lowered for trigger in triggers):
         return None
 
-    separators = [":", "-", "—"]
-    for separator in separators:
-        if separator in text:
-            right = text.split(separator, maxsplit=1)[1].strip()
-            if right:
-                return right
-
-    # If no separator, use the original text minus leading trigger phrase.
+    # Parse from trigger onward so punctuation earlier in the sentence does not
+    # accidentally change what gets saved.
     for trigger in triggers:
         index = lowered.find(trigger)
         if index != -1:
-            remainder = text[index + len(trigger) :].strip(" .")
+            remainder = text[index + len(trigger) :].strip()
+            if remainder.startswith((": ", "-", "—")):
+                remainder = remainder[1:].strip()
+            remainder = remainder.strip()
             if remainder:
                 return remainder
 

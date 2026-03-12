@@ -403,7 +403,9 @@ class SelfHubService:
             return []
         safe_limit = max(1, min(limit, 25))
 
-        query_terms = _tokenize(cleaned_query)
+        query_terms = _meaningful_terms(_tokenize(cleaned_query))
+        if not query_terms:
+            query_terms = _tokenize(cleaned_query)
         expanded_terms = _expand_terms(query_terms)
         results: list[SearchResult] = []
 
@@ -440,6 +442,7 @@ class SelfHubService:
 
         query_lower = query.lower()
         path_terms = _tokenize(rel_path.replace("/", " "))
+        path_overlap_hits = len(expanded_terms & path_terms)
         path_overlap = _coverage(expanded_terms, path_terms)
         best_score = 0.0
         best_index: int | None = None
@@ -472,10 +475,20 @@ class SelfHubService:
                 score = semantic if mode == "semantic" else max(lexical, semantic)
 
                 if mode == "semantic":
-                    if not exact_hit and expanded_coverage < 0.20 and path_overlap < 0.20:
+                    if (
+                        not exact_hit
+                        and expanded_coverage < 0.20
+                        and path_overlap < 0.20
+                        and path_overlap_hits == 0
+                    ):
                         continue
                 if mode == "hybrid":
-                    if not exact_hit and term_coverage < 0.20 and expanded_coverage < 0.20:
+                    if (
+                        not exact_hit
+                        and term_coverage < 0.20
+                        and expanded_coverage < 0.20
+                        and path_overlap_hits == 0
+                    ):
                         continue
 
             if score > best_score:
@@ -484,7 +497,7 @@ class SelfHubService:
 
         # Path-aware fallback: if query maps to a category (e.g., "work" -> career), return
         # the latest content line from that file even if direct term overlap is weak.
-        if best_index is None and mode in {"semantic", "hybrid"} and path_overlap >= 0.20:
+        if best_index is None and mode in {"semantic", "hybrid"} and path_overlap_hits >= 1:
             fallback_index = _latest_content_line_index(lines)
             if fallback_index is None:
                 return None
@@ -659,6 +672,39 @@ _SYNONYM_MAP: dict[str, set[str]] = {
     "hobbies": {"hobby", "interest", "interests"},
 }
 
+_STOPWORDS: set[str] = {
+    "a",
+    "about",
+    "am",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "did",
+    "do",
+    "for",
+    "from",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "me",
+    "my",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "to",
+    "what",
+    "where",
+    "who",
+    "you",
+}
+
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9'_-]*")
 
 
@@ -671,6 +717,10 @@ def _expand_terms(terms: set[str]) -> set[str]:
     for term in terms:
         expanded.update(_SYNONYM_MAP.get(term, set()))
     return expanded
+
+
+def _meaningful_terms(terms: set[str]) -> set[str]:
+    return {term for term in terms if term not in _STOPWORDS}
 
 
 def _coverage(query_terms: set[str], target_terms: set[str]) -> float:

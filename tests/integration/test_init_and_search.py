@@ -57,6 +57,22 @@ def test_search_semantic_understands_work_to_career(tmp_path: Path) -> None:
     assert "payments systems" in results[0].excerpt
 
 
+def test_search_hybrid_handles_what_did_you_save_in_my_career(tmp_path: Path) -> None:
+    repo_path = tmp_path / "selfhub"
+    service = SelfHubService(repo_path)
+    service.init_repo()
+
+    service.save(
+        "I am building OpenLearn, OpenLearn-Trace, and OpenLearn-Architecture-Builder",
+        file_path="experiences/career.md",
+    )
+    results = service.search("what information did you save in my career?", mode="hybrid")
+
+    assert len(results) >= 1
+    assert results[0].path == "/experiences/career.md"
+    assert "OpenLearn-Architecture-Builder" in results[0].excerpt
+
+
 def test_status_and_sync_without_remote(tmp_path: Path) -> None:
     repo_path = tmp_path / "selfhub"
     service = SelfHubService(repo_path)
