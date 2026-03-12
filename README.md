@@ -1,3 +1,5 @@
+_Once upon a time, personal context was scattered across a thousand chat windows and AI providers: half-remembered preferences, lost goals, forgotten life events, fragments of identity trapped behind product walls. Each new model asked the same questions like it had never met me before, and I kept reintroducing myself to machines that claimed to be intelligent. This era has to end. If AI is going to move from chatbot to true assistant, it needs a memory layer that is portable, inspectable, editable, and owned by the person it represents, not by the platform that captured it. I built SelfHub to close that gap, not for one model, but for AI as a whole. This repo is where it began.
+— @dimichoueiry, March 2026 (writing style totally inspired by: @karpathy)_
 
 # SelfHub
 
