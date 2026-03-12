@@ -1,3 +1,5 @@
+https://github.com/user-attachments/assets/1a90d6d7-4cd9-48e3-a066-9e7723312cc7
+
 # SelfHub
 
 SelfHub is a CLI-first personal identity platform.
