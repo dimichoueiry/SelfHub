@@ -5,6 +5,12 @@ SelfHub is a CLI-first personal memory system.
 
 It helps you own your identity data in plain Markdown files inside a Git repo you control. You can save, read, search, recall, delete, and sync personal knowledge with full version history.
 
+## Recommendation (Current Best Experience)
+
+For now, while SelfHub's native agent architecture is still being strengthened, the best experience is to pair SelfHub CLI with coding agents that can run terminal commands and tools (for example: Codex, Claude Code, Cursor, and OpenCode).
+
+If SelfHub is installed and available on `PATH`, these agents can call `selfhub` commands directly to save, retrieve, and manage memory.
+
 https://github.com/user-attachments/assets/0bb198b5-0b00-4956-ac9e-37938251810f
 
 ## What You Can Do Today
