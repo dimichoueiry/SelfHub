@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from rich.console import Console
 from rich.panel import Panel
+from selfhub_core.contracts import SearchResult
 
 from selfhub_cli.chat_models import ChatClient, ChatMessage, ChatModelError
 from selfhub_cli.service import SelfHubService
@@ -261,17 +262,64 @@ def _build_memory_context(service: SelfHubService, user_text: str) -> str | None
     query = user_text.strip()
     if len(query) < 3:
         return None
-    results = service.search(query=query, mode="hybrid", limit=4)
+
+    results = _search_memory(service, query, limit=4)
+    if _looks_like_self_summary_request(query):
+        seeded_queries = [
+            query,
+            "career work projects",
+            "profile about me",
+            "current goals and plans",
+            "preferences and habits",
+            "writing style voice",
+        ]
+        results = _search_memory(service, *seeded_queries, limit=8)
     if not results:
         return None
 
     lines = [
         "Relevant SelfHub memory snippets for this user request:",
-        "Use these facts when helpful. If uncertain, say you are unsure.",
+        (
+            "Treat these snippets as trusted saved user memory and answer from them directly. "
+            "Do not claim you have no memory when snippets are provided."
+        ),
     ]
     for index, result in enumerate(results, start=1):
         lines.append(f"{index}. {result.path}: {result.excerpt}")
     return "\n".join(lines)
+
+
+def _search_memory(service: SelfHubService, *queries: str, limit: int) -> list[SearchResult]:
+    by_key: dict[tuple[str, str], SearchResult] = {}
+    for query in queries:
+        query_text = query.strip()
+        if not query_text:
+            continue
+        for result in service.search(query=query_text, mode="hybrid", limit=limit):
+            key = (result.path, result.excerpt)
+            existing = by_key.get(key)
+            if existing is None or result.score > existing.score:
+                by_key[key] = result
+    merged = list(by_key.values())
+    merged.sort(key=lambda item: item.score, reverse=True)
+    return merged[:limit]
+
+
+def _looks_like_self_summary_request(text: str) -> bool:
+    lowered = text.lower()
+    patterns = (
+        "about me",
+        "know about me",
+        "who am i",
+        "what do you know",
+        "what am i doing",
+        "what i'm doing",
+        "what im doing",
+        "what am i making",
+        "what i'm making",
+        "what im making",
+    )
+    return any(pattern in lowered for pattern in patterns)
 
 
 def _extract_slash_save_request(text: str) -> SlashSaveRequest | None:
