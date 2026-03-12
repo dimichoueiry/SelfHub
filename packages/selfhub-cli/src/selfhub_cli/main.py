@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -18,6 +19,111 @@ from selfhub_cli.service import SelfHubService
 from selfhub_cli.settings import load_settings, save_settings
 
 app = typer.Typer(help="SelfHub CLI")
+
+
+@dataclass(frozen=True, slots=True)
+class ChoiceOption:
+    value: str
+    label: str
+    description: str
+
+
+REPO_MODE_OPTIONS: tuple[ChoiceOption, ...] = (
+    ChoiceOption(
+        value="local",
+        label="Local only",
+        description="Initialize a local SelfHub repository with no remote configured.",
+    ),
+    ChoiceOption(
+        value="remote",
+        label="Existing remote",
+        description="Connect to an existing Git remote URL you already control.",
+    ),
+    ChoiceOption(
+        value="github",
+        label="GitHub bootstrap",
+        description="Create or find private repo 'selfhub' on GitHub, then connect automatically.",
+    ),
+)
+
+PROVIDER_OPTIONS: tuple[ChoiceOption, ...] = (
+    ChoiceOption(
+        value="openrouter",
+        label="OpenRouter",
+        description="Cloud models with broad choices and easy key-based setup.",
+    ),
+    ChoiceOption(
+        value="ollama",
+        label="Ollama local",
+        description="Run local models on your machine for privacy and offline development.",
+    ),
+    ChoiceOption(
+        value="skip",
+        label="Skip for now",
+        description="Finish repo setup now and configure AI models later.",
+    ),
+)
+
+OPENROUTER_MODEL_OPTIONS: tuple[ChoiceOption, ...] = (
+    ChoiceOption(
+        value="openai/gpt-4o-mini",
+        label="GPT-4o mini (cheap)",
+        description="Low cost and fast. Great default for frequent save classification calls.",
+    ),
+    ChoiceOption(
+        value="anthropic/claude-3.5-haiku",
+        label="Claude 3.5 Haiku (cheap)",
+        description="Very fast and affordable with strong instruction-following.",
+    ),
+    ChoiceOption(
+        value="openai/gpt-4.1-mini",
+        label="GPT-4.1 mini (balanced)",
+        description="Balanced cost and quality for general-purpose daily usage.",
+    ),
+    ChoiceOption(
+        value="anthropic/claude-3.5-sonnet",
+        label="Claude 3.5 Sonnet (premium)",
+        description="Higher quality reasoning and writing at higher cost.",
+    ),
+    ChoiceOption(
+        value="openai/gpt-4o",
+        label="GPT-4o (premium)",
+        description="Strong all-around quality with higher per-token pricing.",
+    ),
+    ChoiceOption(
+        value="__custom__",
+        label="Custom model id",
+        description="Enter any OpenRouter model identifier manually.",
+    ),
+)
+
+OLLAMA_MODEL_OPTIONS: tuple[ChoiceOption, ...] = (
+    ChoiceOption(
+        value="llama3.1:8b",
+        label="Llama 3.1 8B (lightweight)",
+        description="Fast local baseline with minimal hardware requirements.",
+    ),
+    ChoiceOption(
+        value="qwen2.5:14b",
+        label="Qwen 2.5 14B (balanced)",
+        description="Good local quality/latency balance for broader tasks.",
+    ),
+    ChoiceOption(
+        value="mistral-nemo:12b",
+        label="Mistral Nemo 12B (balanced)",
+        description="Solid local performer with moderate resource usage.",
+    ),
+    ChoiceOption(
+        value="llama3.1:70b",
+        label="Llama 3.1 70B (powerful)",
+        description="High quality local model for strong hardware setups.",
+    ),
+    ChoiceOption(
+        value="__custom__",
+        label="Custom model id",
+        description="Enter any Ollama model tag manually.",
+    ),
+)
 
 
 def _emit(payload: dict[str, object], as_json: bool) -> None:
@@ -65,28 +171,40 @@ def setup_command(
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
     settings = load_settings()
-    typer.echo("SelfHub setup wizard")
-    typer.echo("This wizard configures your local repo and model provider.")
+    typer.secho("SelfHub Setup Wizard", fg=typer.colors.CYAN, bold=True)
+    typer.echo("This step-by-step flow configures your repository, model provider, and secrets.")
+    typer.echo("Nothing is pushed remotely unless you choose a remote/GitHub mode.")
 
+    _print_step(
+        1,
+        4,
+        "Workspace",
+        "Choose where your local SelfHub files should live on this machine.",
+    )
     default_path = str(resolve_repo_path(None, settings))
     repo_input = typer.prompt("Local SelfHub path", default=default_path).strip()
     repo_path = Path(repo_input).expanduser()
 
-    setup_mode = typer.prompt(
-        "Repo setup mode [local|remote|github]",
-        default="github" if settings.github_owner else "local",
-    ).strip().lower()
-    if setup_mode not in {"local", "remote", "github"}:
-        typer.echo("Invalid setup mode. Use local, remote, or github.")
-        raise typer.Exit(code=1)
-
+    _print_step(
+        2,
+        4,
+        "Repository Connection",
+        "Pick how SelfHub should connect your local repo to a remote (if any).",
+    )
+    setup_mode = _choose_option(
+        prompt="Repository mode",
+        options=REPO_MODE_OPTIONS,
+        default_value="github" if settings.github_owner else "local",
+    )
     remote_url: str | None = None
     github_owner: str | None = settings.github_owner
     github_token: str | None = None
 
     if setup_mode == "remote":
+        typer.echo("Using an existing remote keeps your current hosting setup unchanged.")
         remote_url = typer.prompt("Remote URL (SSH or HTTPS)").strip()
     elif setup_mode == "github":
+        typer.echo("GitHub bootstrap will create/find private repo 'selfhub' for this account.")
         github_owner = typer.prompt(
             "GitHub owner (username or org)",
             default=settings.github_owner or "",
@@ -103,6 +221,71 @@ def setup_command(
             raise typer.Exit(code=1)
         _store_secret(SECRET_GITHUB_TOKEN, github_token)
 
+    _print_step(
+        3,
+        4,
+        "Model Provider",
+        "Choose the model backend for save classification and duplicate detection.",
+    )
+    provider_default = settings.llm_provider or "skip"
+    model_choice = _choose_option(
+        prompt="Model provider",
+        options=PROVIDER_OPTIONS,
+        default_value=provider_default,
+    )
+
+    configured_provider: str | None = None
+    configured_model: str | None = None
+    configured_ollama_url: str | None = None
+    key_saved = False
+
+    if model_choice == "openrouter":
+        configured_provider = "openrouter"
+        typer.echo("OpenRouter model options (cheap, balanced, premium):")
+        configured_model = _choose_model(
+            provider="openrouter",
+            current_model=settings.llm_model,
+        )
+        openrouter_key = _resolve_or_prompt_secret(
+            secret_name=SECRET_OPENROUTER_API_KEY,
+            prompt_label="OpenRouter API key",
+        )
+        if openrouter_key:
+            key_saved = _store_secret(SECRET_OPENROUTER_API_KEY, openrouter_key)
+    elif model_choice == "ollama":
+        configured_provider = "ollama"
+        typer.echo("Ollama local model options (includes Qwen):")
+        configured_model = _choose_model(
+            provider="ollama",
+            current_model=settings.llm_model,
+        )
+        configured_ollama_url = typer.prompt(
+            "Ollama base URL",
+            default=settings.ollama_base_url or "http://localhost:11434",
+        ).strip().rstrip("/")
+    else:
+        typer.echo("Skipping model configuration for now. You can rerun `selfhub setup` anytime.")
+
+    _print_step(
+        4,
+        4,
+        "Confirmation",
+        "Review your choices. Setup will initialize repo structure and persist configuration.",
+    )
+    _print_summary(
+        repo_path=repo_path,
+        setup_mode=setup_mode,
+        remote_url=remote_url,
+        github_owner=github_owner,
+        model_provider=configured_provider,
+        model=configured_model,
+        ollama_url=configured_ollama_url,
+    )
+    proceed = typer.confirm("Apply this setup now?", default=True)
+    if not proceed:
+        typer.echo("Setup canceled. No changes were applied.")
+        raise typer.Exit(code=0)
+
     service = SelfHubService(repo_path)
     init_result = service.init_repo(
         remote_url=remote_url,
@@ -113,42 +296,6 @@ def setup_command(
     if not init_result.success:
         _emit(init_result.to_dict(), as_json)
         raise typer.Exit(code=1)
-
-    model_choice = typer.prompt(
-        "Model provider [openrouter|ollama|skip]",
-        default=settings.llm_provider or "skip",
-    ).strip().lower()
-    if model_choice not in {"openrouter", "ollama", "skip"}:
-        typer.echo("Invalid model provider. Use openrouter, ollama, or skip.")
-        raise typer.Exit(code=1)
-
-    configured_provider: str | None = None
-    configured_model: str | None = None
-    configured_ollama_url: str | None = None
-    key_saved = False
-
-    if model_choice == "openrouter":
-        configured_provider = "openrouter"
-        configured_model = typer.prompt(
-            "OpenRouter model",
-            default=settings.llm_model or "anthropic/claude-3.5-haiku",
-        ).strip()
-        openrouter_key = _resolve_or_prompt_secret(
-            secret_name=SECRET_OPENROUTER_API_KEY,
-            prompt_label="OpenRouter API key",
-        )
-        if openrouter_key:
-            key_saved = _store_secret(SECRET_OPENROUTER_API_KEY, openrouter_key)
-    elif model_choice == "ollama":
-        configured_provider = "ollama"
-        configured_model = typer.prompt(
-            "Ollama model",
-            default=settings.llm_model or "llama3.1:8b",
-        ).strip()
-        configured_ollama_url = typer.prompt(
-            "Ollama base URL",
-            default=settings.ollama_base_url or "http://localhost:11434",
-        ).strip().rstrip("/")
 
     settings.repo_path = str(repo_path)
     settings.github_owner = github_owner
@@ -308,6 +455,107 @@ def search_command(
 
 def main() -> None:
     app()
+
+
+def _print_step(step_number: int, total_steps: int, title: str, description: str) -> None:
+    typer.secho(
+        f"\nStep {step_number}/{total_steps}: {title}",
+        fg=typer.colors.BRIGHT_CYAN,
+        bold=True,
+    )
+    typer.echo(description)
+
+
+def _choose_option(
+    prompt: str,
+    options: tuple[ChoiceOption, ...],
+    default_value: str,
+) -> str:
+    default_index = _default_option_index(options, default_value)
+    for index, option in enumerate(options, start=1):
+        typer.secho(f"  {index}. {option.label}", fg=typer.colors.GREEN)
+        typer.echo(f"     {option.description}")
+
+    raw_choice = typer.prompt(
+        f"{prompt} (number or value)",
+        default=str(default_index),
+    ).strip()
+    selected = _parse_option_choice(raw_choice, options)
+    if selected is None:
+        typer.echo("Invalid selection. Please rerun setup and choose a valid option.")
+        raise typer.Exit(code=1)
+    return selected
+
+
+def _choose_model(provider: str, current_model: str | None) -> str:
+    if provider == "openrouter":
+        options = OPENROUTER_MODEL_OPTIONS
+        default_model = current_model or "openai/gpt-4o-mini"
+    elif provider == "ollama":
+        options = OLLAMA_MODEL_OPTIONS
+        default_model = current_model or "llama3.1:8b"
+    else:
+        raise typer.Exit(code=1)
+
+    selected_value = _choose_option(
+        prompt="Model option",
+        options=options,
+        default_value=default_model,
+    )
+    if selected_value == "__custom__":
+        custom_value = typer.prompt(
+            "Custom model id",
+            default=current_model or "",
+        )
+        custom = str(custom_value).strip()
+        if not custom:
+            typer.echo("Model id cannot be empty.")
+            raise typer.Exit(code=1)
+        return custom
+    return selected_value
+
+
+def _print_summary(
+    repo_path: Path,
+    setup_mode: str,
+    remote_url: str | None,
+    github_owner: str | None,
+    model_provider: str | None,
+    model: str | None,
+    ollama_url: str | None,
+) -> None:
+    typer.secho("Setup summary:", fg=typer.colors.BRIGHT_WHITE, bold=True)
+    typer.echo(f"  repo_path: {repo_path}")
+    typer.echo(f"  repository_mode: {setup_mode}")
+    if remote_url:
+        typer.echo(f"  remote_url: {remote_url}")
+    if github_owner and setup_mode == "github":
+        typer.echo(f"  github_owner: {github_owner}")
+    typer.echo(f"  model_provider: {model_provider or 'none'}")
+    if model:
+        typer.echo(f"  model: {model}")
+    if ollama_url:
+        typer.echo(f"  ollama_base_url: {ollama_url}")
+
+
+def _default_option_index(options: tuple[ChoiceOption, ...], value: str) -> int:
+    for index, option in enumerate(options, start=1):
+        if option.value == value:
+            return index
+    return 1
+
+
+def _parse_option_choice(raw_choice: str, options: tuple[ChoiceOption, ...]) -> str | None:
+    if raw_choice.isdigit():
+        index = int(raw_choice)
+        if 1 <= index <= len(options):
+            return options[index - 1].value
+
+    lowered = raw_choice.strip().lower()
+    for option in options:
+        if option.value == lowered:
+            return option.value
+    return None
 
 
 def _resolve_or_prompt_secret(secret_name: str, prompt_label: str) -> str | None:
