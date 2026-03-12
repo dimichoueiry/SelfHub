@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
+from difflib import get_close_matches
 from pathlib import Path
 from typing import Annotated
 
+import click
 import typer
 
 from selfhub_cli.runtime import resolve_repo_path, resolve_save_intelligence
@@ -19,6 +21,28 @@ from selfhub_cli.service import SelfHubService
 from selfhub_cli.settings import load_settings, save_settings
 
 app = typer.Typer(help="SelfHub CLI")
+
+COMMAND_NAMES: tuple[str, ...] = (
+    "init",
+    "setup",
+    "save",
+    "read",
+    "status",
+    "sync",
+    "log",
+    "search",
+)
+
+OPTION_COMMAND_ALIASES: dict[str, str] = {
+    "--init": "init",
+    "--setup": "setup",
+    "--save": "save",
+    "--read": "read",
+    "--status": "status",
+    "--sync": "sync",
+    "--log": "log",
+    "--search": "search",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -454,7 +478,23 @@ def search_command(
 
 
 def main() -> None:
-    app()
+    raw_args = sys.argv[1:]
+    normalized_args, upfront_hint = _normalize_argv(raw_args)
+    if upfront_hint:
+        typer.secho(upfront_hint, fg=typer.colors.YELLOW)
+
+    try:
+        app(
+            args=normalized_args,
+            prog_name="selfhub",
+            standalone_mode=False,
+        )
+    except click.ClickException as exc:
+        exc.show()
+        hint = _build_error_hint(exc, normalized_args)
+        if hint:
+            typer.secho(f"Hint: {hint}", fg=typer.colors.YELLOW)
+        raise SystemExit(exc.exit_code) from exc
 
 
 def _print_step(step_number: int, total_steps: int, title: str, description: str) -> None:
@@ -555,6 +595,65 @@ def _parse_option_choice(raw_choice: str, options: tuple[ChoiceOption, ...]) -> 
     for option in options:
         if option.value == lowered:
             return option.value
+    return None
+
+
+def _normalize_argv(argv: list[str]) -> tuple[list[str], str | None]:
+    if not argv:
+        return (argv, None)
+
+    first = argv[0]
+    alias_target = OPTION_COMMAND_ALIASES.get(first)
+    if alias_target:
+        return (
+            [alias_target, *argv[1:]],
+            f"Interpreting `{first}` as `selfhub {alias_target}`.",
+        )
+
+    if first.startswith("--"):
+        candidate = first[2:]
+        if candidate in COMMAND_NAMES:
+            return (
+                [candidate, *argv[1:]],
+                f"Interpreting `{first}` as `selfhub {candidate}`.",
+            )
+
+    if argv[-1] == "--read" and len(argv) >= 2 and not argv[0].startswith("-"):
+        path = argv[0]
+        remainder = argv[1:-1]
+        if not remainder:
+            return (
+                ["read", path],
+                "Interpreting trailing `--read` as `selfhub read <path>`.",
+            )
+
+    return (argv, None)
+
+
+def _build_error_hint(exc: click.ClickException, argv: list[str]) -> str | None:
+    if isinstance(exc, click.NoSuchOption):
+        option = f"--{exc.option_name}" if exc.option_name else None
+        if option and option in OPTION_COMMAND_ALIASES:
+            command = OPTION_COMMAND_ALIASES[option]
+            return f"`{option}` is a command-style alias. Try `selfhub {command} ...`."
+        return None
+
+    message = exc.format_message()
+    if "No such command" not in message or not argv:
+        return None
+
+    token = argv[0]
+    if token.startswith("--"):
+        candidate = token[2:]
+        if candidate in COMMAND_NAMES:
+            return f"Use `selfhub {candidate} ...` (without `--`)."
+
+    if "/" in token or token.endswith(".md"):
+        return f"Looks like a file path. Try `selfhub read {token}`."
+
+    close = get_close_matches(token, COMMAND_NAMES, n=1)
+    if close:
+        return f"Did you mean `selfhub {close[0]}`?"
     return None
 
 
