@@ -25,6 +25,7 @@ from selfhub_cli.secrets import (
 )
 from selfhub_cli.service import SelfHubService
 from selfhub_cli.settings import load_settings, save_settings
+from selfhub_cli.tool_catalog import CLI_TOOLS, SLASH_TOOLS, build_tools_payload
 
 app = typer.Typer(help="SelfHub CLI")
 console = Console()
@@ -35,6 +36,7 @@ COMMAND_NAMES: tuple[str, ...] = (
     "console",
     "save",
     "delete",
+    "tools",
     "read",
     "status",
     "sync",
@@ -48,6 +50,7 @@ OPTION_COMMAND_ALIASES: dict[str, str] = {
     "--console": "console",
     "--save": "save",
     "--delete": "delete",
+    "--tools": "tools",
     "--read": "read",
     "--status": "status",
     "--sync": "sync",
@@ -580,6 +583,17 @@ def delete_command(
     _emit(result.to_dict(), as_json)
 
 
+@app.command("tools")
+def tools_command(
+    as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
+) -> None:
+    payload = build_tools_payload()
+    if as_json:
+        _emit(payload, as_json=True)
+        return
+    _print_tools_catalog()
+
+
 @app.command("read")
 def read_command(
     target: Annotated[str | None, typer.Argument(help="Optional folder or file path")] = None,
@@ -764,6 +778,48 @@ def _print_summary(
             padding=(0, 1),
         )
     )
+
+
+def _print_tools_catalog() -> None:
+    cli_table = Table(
+        show_header=True,
+        header_style="bold bright_white",
+        box=box.SIMPLE_HEAVY,
+        expand=False,
+    )
+    cli_table.add_column("Command", style="bold cyan", no_wrap=True)
+    cli_table.add_column("Usage", style="green")
+    cli_table.add_column("Purpose", style="white")
+    for tool in CLI_TOOLS:
+        cli_table.add_row(tool.name, tool.usage, tool.purpose)
+
+    slash_table = Table(
+        show_header=True,
+        header_style="bold bright_white",
+        box=box.SIMPLE_HEAVY,
+        expand=False,
+    )
+    slash_table.add_column("Slash", style="bold cyan", no_wrap=True)
+    slash_table.add_column("Usage", style="green")
+    slash_table.add_column("Purpose", style="white")
+    for tool in SLASH_TOOLS:
+        slash_table.add_row(tool.name, tool.usage, tool.purpose)
+
+    console.print(
+        Panel(
+            (
+                "SelfHub can be used directly via CLI commands "
+                "or via slash tools in `selfhub console`."
+            ),
+            title="Tool Catalog",
+            border_style="bright_cyan",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
+    console.print(cli_table)
+    console.print()
+    console.print(slash_table)
 
 
 def _print_wizard_landing() -> None:

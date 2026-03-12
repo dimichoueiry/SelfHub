@@ -19,3 +19,9 @@ def test_normalize_passthrough_for_valid_command() -> None:
     args, hint = _normalize_argv(["read", "meta/profile.md"])
     assert args == ["read", "meta/profile.md"]
     assert hint is None
+
+
+def test_normalize_option_style_tools() -> None:
+    args, hint = _normalize_argv(["--tools"])
+    assert args == ["tools"]
+    assert hint is not None

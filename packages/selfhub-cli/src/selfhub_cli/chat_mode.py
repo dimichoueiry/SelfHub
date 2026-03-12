@@ -4,12 +4,15 @@ import shlex
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 from selfhub_core.contracts import SearchResult
 
 from selfhub_cli.chat_models import ChatClient, ChatMessage, ChatModelError
 from selfhub_cli.service import SelfHubService
+from selfhub_cli.tool_catalog import CLI_TOOLS, SLASH_TOOLS
 
 console = Console()
 
@@ -69,6 +72,9 @@ def run_console(
             if lower.startswith("/save"):
                 print("Use /chat first, then /save in chat mode.")
                 continue
+            if lower == "/tools":
+                _print_tools_catalog()
+                continue
             if lower == "/help":
                 _print_console_help(mode)
                 continue
@@ -91,6 +97,9 @@ def run_console(
             continue
         if lower == "/help":
             _print_console_help(mode)
+            continue
+        if lower == "/tools":
+            _print_tools_catalog()
             continue
         if lower == "/chat":
             print("Already in chat mode.")
@@ -376,6 +385,7 @@ def _print_console_intro() -> None:
     print("SelfHub console")
     print("- Command mode: type CLI commands directly (example: read meta/profile.md)")
     print("- Type /chat to switch into agent chat mode")
+    print("- Type /tools to view available commands and slash tools")
     print("- Type /exit to quit")
 
 
@@ -383,6 +393,7 @@ def _print_chat_mode_intro(chat_ready: bool) -> None:
     print("Switched to chat mode.")
     print("- /unchat to return to command mode")
     print("- /exit to quit")
+    print("- /tools to view available commands and slash tools")
     print("- /save <content> to save immediately")
     if not chat_ready:
         print("- No chat model configured yet. You can still use save-detection commands.")
@@ -393,6 +404,7 @@ def _print_console_help(mode: str) -> None:
         print("Command mode help:")
         print("- Run normal commands: read, save, status, sync, log, search")
         print("- /chat to enter chat mode")
+        print("- /tools to inspect available tools")
         print("- /exit to quit")
         return
 
@@ -401,6 +413,7 @@ def _print_console_help(mode: str) -> None:
     print("- Say things like 'save this: ...' for explicit saves")
     print("- Use /save <content> for direct save from chat mode")
     print("- For save suggestions: 1=save, 2=edit then save, 3=dismiss")
+    print("- /tools to inspect available tools")
     print("- /unchat to return to command mode")
     print("- /exit to quit")
 
@@ -445,3 +458,42 @@ def _print_notice(message: str) -> None:
             padding=(0, 1),
         )
     )
+
+
+def _print_tools_catalog() -> None:
+    cli_table = Table(
+        show_header=True,
+        header_style="bold bright_white",
+        box=box.SIMPLE_HEAVY,
+        expand=False,
+    )
+    cli_table.add_column("CLI", style="bold cyan", no_wrap=True)
+    cli_table.add_column("Usage", style="green")
+    cli_table.add_column("Purpose", style="white")
+    for tool in CLI_TOOLS:
+        cli_table.add_row(tool.name, tool.usage, tool.purpose)
+
+    slash_table = Table(
+        show_header=True,
+        header_style="bold bright_white",
+        box=box.SIMPLE_HEAVY,
+        expand=False,
+    )
+    slash_table.add_column("Slash", style="bold cyan", no_wrap=True)
+    slash_table.add_column("Usage", style="green")
+    slash_table.add_column("Purpose", style="white")
+    for tool in SLASH_TOOLS:
+        slash_table.add_row(tool.name, tool.usage, tool.purpose)
+
+    console.print(
+        Panel(
+            "Tool overview for SelfHub console and CLI automation.",
+            title="Available Tools",
+            border_style="bright_cyan",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
+    console.print(cli_table)
+    console.print()
+    console.print(slash_table)

@@ -86,10 +86,17 @@ Run:
 selfhub console
 ```
 
+Discover available automation-friendly commands at any time:
+
+```bash
+selfhub tools
+```
+
 In console mode:
 
 - command mode accepts normal commands (`read`, `save`, `status`, ...)
 - use `selfhub delete --file <path> --index <n>` to remove a bad saved bullet entry
+- `/tools` shows all CLI and slash tools available to the current session
 - `/chat` switches to conversational agent mode
 - `/unchat` returns to command mode
 - `/save <content>` in chat mode saves immediately
