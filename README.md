@@ -39,6 +39,13 @@ uv run mypy packages
 
 `selfhub save` uses LLM classification unless `--file` is provided.
 
+Custom folders/files are supported:
+
+- `selfhub read` and `selfhub search` include custom markdown files.
+- `selfhub save --file custom/notes.md "..."` creates and writes to custom paths.
+- LLM classification can route into existing custom markdown files.
+- Saves create git commits and push when a remote is configured.
+
 ## Onboarding Wizard
 
 Run:

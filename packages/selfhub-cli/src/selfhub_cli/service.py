@@ -142,10 +142,11 @@ class SelfHubService:
                     ),
                 )
 
+            allowed_files = self._classification_file_candidates()
             try:
                 decision = self.save_intelligence.classify(
                     content=content,
-                    allowed_files=list(DEFAULT_MARKDOWN_FILES.keys()),
+                    allowed_files=allowed_files,
                 )
             except SaveIntelligenceError as exc:
                 return SaveResult(success=False, message=str(exc))
@@ -170,7 +171,7 @@ class SelfHubService:
                         "suggested_file": decision.target_file,
                         "confidence": decision.confidence,
                         "reason": decision.reason,
-                        "allowed_files": sorted(DEFAULT_MARKDOWN_FILES.keys()),
+                        "allowed_files": allowed_files,
                     },
                 )
 
@@ -476,6 +477,15 @@ class SelfHubService:
             status = get_status(self.repo_path)
             if status.behind > 0:
                 pull(self.repo_path)
+
+    def _classification_file_candidates(self) -> list[str]:
+        # Use both standard schema files and any custom markdown files created by the user.
+        candidates = set(DEFAULT_MARKDOWN_FILES.keys())
+        if self.repo_path.exists():
+            for file_path in self._markdown_files(self.repo_path):
+                relative = str(file_path.relative_to(self.repo_path))
+                candidates.add(relative)
+        return sorted(candidates)
 
     def _safe_target_path(self, rel_path: str) -> Path | None:
         candidate = (self.repo_path / rel_path).resolve()
