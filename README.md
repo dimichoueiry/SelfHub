@@ -80,6 +80,19 @@ export OLLAMA_BASE_URL=http://localhost:11434
 export SELFHUB_CHAT_MODEL=qwen2.5:14b
 ```
 
+Semantic retrieval embeddings (for `search --mode semantic|hybrid` and `recall`):
+
+```bash
+export SELFHUB_EMBEDDING_PROVIDER=openrouter   # or ollama
+export SELFHUB_EMBEDDING_MODEL=openai/text-embedding-3-small
+```
+
+Notes:
+
+- If embedding vars are omitted, SelfHub falls back to thinking/chat provider defaults.
+- OpenRouter embeddings require `OPENROUTER_API_KEY`.
+- Ollama embeddings default model is `nomic-embed-text`.
+
 ## Console Mode
 
 Run:
@@ -109,7 +122,7 @@ selfhub recall "what do you know about me?" --json
 
 In console mode:
 
-- command mode accepts normal commands (`read`, `save`, `status`, ...)
+- command mode accepts normal commands (`read`, `save`, `delete`, `search`, `recall`, `status`, ...)
 - use `selfhub delete --file <path> --index <n>` to remove a bad saved bullet entry
 - `/tools` shows all CLI and slash tools available to the current session
 - `/chat` switches to conversational agent mode

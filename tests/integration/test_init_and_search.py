@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path
 
 from selfhub_cli.service import SelfHubService
+from selfhub_core.contracts import SearchResult
 
 
 def _run_git(args: list[str], cwd: Path) -> str:
@@ -13,6 +14,17 @@ def _run_git(args: list[str], cwd: Path) -> str:
         text=True,
     )
     return result.stdout.strip()
+
+
+class FakeSemanticBackend:
+    def search(self, query: str, limit: int = 8) -> list[SearchResult]:
+        return [
+            SearchResult(
+                path="/custom/semantic.md",
+                excerpt="Semantic hit for broad meaning query",
+                score=0.91,
+            )
+        ]
 
 
 def test_init_creates_standard_files(tmp_path: Path) -> None:
@@ -89,6 +101,18 @@ def test_recall_returns_results_for_broad_question(tmp_path: Path) -> None:
     assert isinstance(results, list)
     assert results
     assert any(item["path"] == "/experiences/career.md" for item in results)
+
+
+def test_hybrid_search_includes_semantic_backend_results(tmp_path: Path) -> None:
+    repo_path = tmp_path / "selfhub"
+    service = SelfHubService(
+        repo_path,
+        semantic_search=FakeSemanticBackend(),
+    )
+    service.init_repo()
+
+    results = service.search("what am i currently building", mode="hybrid")
+    assert any(item.path == "/custom/semantic.md" for item in results)
 
 
 def test_status_and_sync_without_remote(tmp_path: Path) -> None:

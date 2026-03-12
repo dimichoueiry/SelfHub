@@ -7,6 +7,7 @@ from selfhub_core.save_intelligence import LLMConfig, LLMSaveIntelligence, SaveI
 
 from selfhub_cli.chat_models import ChatClient, ChatModelConfig
 from selfhub_cli.secrets import SECRET_OPENROUTER_API_KEY, KeyringSecretStore
+from selfhub_cli.semantic_search import EmbeddingConfig, SemanticSearchEngine
 from selfhub_cli.settings import CLISettings, load_settings
 
 
@@ -114,6 +115,59 @@ def resolve_chat_client(settings: CLISettings | None = None) -> ChatClient | Non
         return ChatClient(config)
 
     return None
+
+
+def resolve_semantic_search(
+    repo_path: Path,
+    settings: CLISettings | None = None,
+) -> SemanticSearchEngine | None:
+    selected = settings or load_settings()
+    provider = (
+        os.getenv("SELFHUB_EMBEDDING_PROVIDER", "").strip().lower()
+        or (
+            selected.embedding_provider
+            or selected.thinking_provider
+            or selected.chat_provider
+            or ""
+        )
+    )
+    if provider not in {"openrouter", "ollama"}:
+        return None
+
+    model_override = os.getenv("SELFHUB_EMBEDDING_MODEL", "").strip()
+    configured_model = selected.embedding_model or selected.thinking_model or selected.chat_model
+    if provider == "openrouter":
+        api_key: str | None = os.getenv("OPENROUTER_API_KEY", "").strip() or None
+        if not api_key:
+            api_key = _load_secret(SECRET_OPENROUTER_API_KEY)
+        if not api_key:
+            return None
+        model = model_override or configured_model or "openai/text-embedding-3-small"
+        return SemanticSearchEngine(
+            repo_path=repo_path,
+            config=EmbeddingConfig(
+                provider="openrouter",
+                model=model,
+                openrouter_api_key=api_key,
+                ollama_base_url=None,
+            ),
+        )
+
+    base_url = (
+        os.getenv("OLLAMA_BASE_URL", "").strip()
+        or selected.ollama_base_url
+        or "http://localhost:11434"
+    ).rstrip("/")
+    model = model_override or configured_model or "nomic-embed-text"
+    return SemanticSearchEngine(
+        repo_path=repo_path,
+        config=EmbeddingConfig(
+            provider="ollama",
+            model=model,
+            openrouter_api_key=None,
+            ollama_base_url=base_url,
+        ),
+    )
 
 
 def _load_secret(name: str) -> str | None:

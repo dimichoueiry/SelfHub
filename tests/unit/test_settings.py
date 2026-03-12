@@ -15,6 +15,8 @@ def test_save_and_load_settings(monkeypatch: MonkeyPatch, tmp_path: Path) -> Non
             github_owner="octocat",
             thinking_provider="ollama",
             thinking_model="llama3.1:8b",
+            embedding_provider="openrouter",
+            embedding_model="openai/text-embedding-3-small",
             chat_provider="openrouter",
             chat_model="openai/gpt-4o-mini",
             ollama_base_url="http://localhost:11434",
@@ -28,6 +30,8 @@ def test_save_and_load_settings(monkeypatch: MonkeyPatch, tmp_path: Path) -> Non
     assert loaded.github_owner == "octocat"
     assert loaded.thinking_provider == "ollama"
     assert loaded.thinking_model == "llama3.1:8b"
+    assert loaded.embedding_provider == "openrouter"
+    assert loaded.embedding_model == "openai/text-embedding-3-small"
     assert loaded.chat_provider == "openrouter"
     assert loaded.chat_model == "openai/gpt-4o-mini"
     assert loaded.ollama_base_url == "http://localhost:11434"
@@ -45,3 +49,5 @@ def test_load_settings_supports_legacy_llm_fields(monkeypatch: MonkeyPatch, tmp_
     loaded = load_settings()
     assert loaded.thinking_provider == "openrouter"
     assert loaded.thinking_model == "openai/gpt-4o-mini"
+    assert loaded.embedding_provider == "openrouter"
+    assert loaded.embedding_model == "openai/gpt-4o-mini"

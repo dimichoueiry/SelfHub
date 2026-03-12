@@ -16,7 +16,12 @@ from rich.table import Table
 from rich.text import Text
 
 from selfhub_cli.chat_mode import run_console
-from selfhub_cli.runtime import resolve_chat_client, resolve_repo_path, resolve_save_intelligence
+from selfhub_cli.runtime import (
+    resolve_chat_client,
+    resolve_repo_path,
+    resolve_save_intelligence,
+    resolve_semantic_search,
+)
 from selfhub_cli.secrets import (
     SECRET_GITHUB_TOKEN,
     SECRET_OPENROUTER_API_KEY,
@@ -189,7 +194,12 @@ def _service(repo_path: Path | None) -> SelfHubService:
     settings = load_settings()
     root = resolve_repo_path(repo_path, settings)
     intelligence = resolve_save_intelligence(settings)
-    return SelfHubService(root, save_intelligence=intelligence)
+    semantic_search = resolve_semantic_search(root, settings)
+    return SelfHubService(
+        root,
+        save_intelligence=intelligence,
+        semantic_search=semantic_search,
+    )
 
 
 @app.command("init")
@@ -424,11 +434,7 @@ def console_command(
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
 ) -> None:
     settings = load_settings()
-    resolved_repo_path = resolve_repo_path(repo_path, settings)
-    service = SelfHubService(
-        resolved_repo_path,
-        save_intelligence=resolve_save_intelligence(settings),
-    )
+    service = _service(repo_path)
     chat_client = resolve_chat_client(settings)
     exit_code = run_console(
         service=service,

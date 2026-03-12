@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
 from selfhub_core import DEFAULT_DIRECTORIES, DEFAULT_MARKDOWN_FILES, REPO_NAME
 from selfhub_core.contracts import CommandResult, SaveResult, SearchResult
@@ -40,14 +41,21 @@ class ParsedEntry:
     text: str
 
 
+class SemanticSearchBackend(Protocol):
+    def search(self, query: str, limit: int = 8) -> list[SearchResult]:
+        ...
+
+
 class SelfHubService:
     def __init__(
         self,
         repo_path: Path,
         save_intelligence: SaveIntelligence | None = None,
+        semantic_search: SemanticSearchBackend | None = None,
     ) -> None:
         self.repo_path = repo_path
         self.save_intelligence = save_intelligence or build_default_save_intelligence()
+        self.semantic_search = semantic_search
 
     def init_repo(
         self,
@@ -549,9 +557,52 @@ class SelfHubService:
             return []
         safe_limit = max(1, min(limit, 25))
 
-        query_terms = _meaningful_terms(_tokenize(cleaned_query))
+        if mode == "exact":
+            return self._search_lexical(
+                query=cleaned_query,
+                mode="exact",
+                limit=safe_limit,
+            )
+
+        lexical_results = self._search_lexical(
+            query=cleaned_query,
+            mode="hybrid",
+            limit=safe_limit,
+        )
+        semantic_results: list[SearchResult] = []
+        if self.semantic_search is not None:
+            try:
+                semantic_results = self.semantic_search.search(
+                    query=cleaned_query,
+                    limit=safe_limit,
+                )
+            except Exception:
+                semantic_results = []
+
+        if mode == "semantic":
+            if semantic_results:
+                return semantic_results[:safe_limit]
+            return self._search_lexical(
+                query=cleaned_query,
+                mode="semantic",
+                limit=safe_limit,
+            )
+
+        return _fuse_search_results(
+            lexical=lexical_results,
+            semantic=semantic_results,
+            limit=safe_limit,
+        )
+
+    def _search_lexical(
+        self,
+        query: str,
+        mode: str,
+        limit: int,
+    ) -> list[SearchResult]:
+        query_terms = _meaningful_terms(_tokenize(query))
         if not query_terms:
-            query_terms = _tokenize(cleaned_query)
+            query_terms = _tokenize(query)
         expanded_terms = _expand_terms(query_terms)
         results: list[SearchResult] = []
 
@@ -563,7 +614,7 @@ class SelfHubService:
             match = self._best_match_for_file(
                 rel_path=rel_path,
                 content=content,
-                query=cleaned_query,
+                query=query,
                 query_terms=query_terms,
                 expanded_terms=expanded_terms,
                 mode=mode,
@@ -571,7 +622,7 @@ class SelfHubService:
             if match is not None:
                 results.append(match)
 
-        return sorted(results, key=lambda item: item.score, reverse=True)[:safe_limit]
+        return sorted(results, key=lambda item: item.score, reverse=True)[:limit]
 
     def recall(self, query: str, mode: str = "hybrid", limit: int = 8) -> CommandResult:
         if mode not in {"exact", "semantic", "hybrid"}:
@@ -1000,3 +1051,44 @@ def _looks_like_self_summary_query(text: str) -> bool:
         "what im making",
     )
     return any(pattern in lowered for pattern in patterns)
+
+
+def _fuse_search_results(
+    lexical: list[SearchResult],
+    semantic: list[SearchResult],
+    limit: int,
+) -> list[SearchResult]:
+    if not semantic:
+        return lexical[:limit]
+    if not lexical:
+        return semantic[:limit]
+
+    fused_scores: dict[tuple[str, str], float] = {}
+    by_key: dict[tuple[str, str], SearchResult] = {}
+
+    for rank, result in enumerate(lexical, start=1):
+        key = (result.path, result.excerpt)
+        by_key[key] = result
+        fused_scores[key] = fused_scores.get(key, 0.0) + (0.65 * result.score) + (
+            0.35 / (rank + 20)
+        )
+
+    for rank, result in enumerate(semantic, start=1):
+        key = (result.path, result.excerpt)
+        existing = by_key.get(key)
+        if existing is None or result.score > existing.score:
+            by_key[key] = result
+        fused_scores[key] = fused_scores.get(key, 0.0) + (0.80 * result.score) + (
+            0.45 / (rank + 20)
+        )
+
+    merged = [
+        SearchResult(
+            path=by_key[key].path,
+            excerpt=by_key[key].excerpt,
+            score=min(1.0, score),
+        )
+        for key, score in fused_scores.items()
+    ]
+    merged.sort(key=lambda item: item.score, reverse=True)
+    return merged[:limit]

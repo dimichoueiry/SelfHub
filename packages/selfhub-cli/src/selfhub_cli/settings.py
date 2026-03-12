@@ -16,6 +16,8 @@ class CLISettings:
     github_owner: str | None = None
     thinking_provider: str | None = None
     thinking_model: str | None = None
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
     chat_provider: str | None = None
     chat_model: str | None = None
     ollama_base_url: str | None = None
@@ -54,6 +56,8 @@ def load_settings() -> CLISettings:
 
     thinking_provider = _normalized_provider(_as_optional_str(parsed.get("thinking_provider")))
     thinking_model = _as_optional_str(parsed.get("thinking_model"))
+    embedding_provider = _normalized_provider(_as_optional_str(parsed.get("embedding_provider")))
+    embedding_model = _as_optional_str(parsed.get("embedding_model"))
     chat_provider = _normalized_provider(_as_optional_str(parsed.get("chat_provider")))
     chat_model = _as_optional_str(parsed.get("chat_model"))
 
@@ -62,12 +66,18 @@ def load_settings() -> CLISettings:
         thinking_provider = legacy_llm_provider
     if thinking_model is None:
         thinking_model = legacy_llm_model
+    if embedding_provider is None:
+        embedding_provider = thinking_provider
+    if embedding_model is None:
+        embedding_model = thinking_model
 
     return CLISettings(
         repo_path=_as_optional_str(parsed.get("repo_path")),
         github_owner=_as_optional_str(parsed.get("github_owner")),
         thinking_provider=thinking_provider,
         thinking_model=thinking_model,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
         chat_provider=chat_provider,
         chat_model=chat_model,
         ollama_base_url=_as_optional_str(parsed.get("ollama_base_url")),
