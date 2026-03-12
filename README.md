@@ -37,7 +37,7 @@ uv run mypy packages
 
 ## Save Classification Setup
 
-`selfhub save` uses LLM classification unless `--file` is provided.
+`selfhub save` uses a dedicated **thinking model** unless `--file` is provided.
 
 Custom folders/files are supported:
 
@@ -58,23 +58,40 @@ The wizard walks through:
 
 - local repo path selection
 - local/remote/GitHub bootstrap setup
-- provider setup (`openrouter`, `ollama`, or `skip`)
+- thinking model setup (backend save intelligence)
+- chat model setup (interactive `/chat` mode)
 - keychain storage for GitHub/OpenRouter secrets when available
 
-OpenRouter:
+Thinking model overrides via env:
 
 ```bash
-export SELFHUB_LLM_PROVIDER=openrouter
+export SELFHUB_THINKING_PROVIDER=openrouter
 export OPENROUTER_API_KEY=...
-export SELFHUB_LLM_MODEL=anthropic/claude-3.5-haiku
+export SELFHUB_THINKING_MODEL=anthropic/claude-3.5-haiku
 ```
 
-Ollama:
+Chat model overrides via env:
 
 ```bash
-export SELFHUB_LLM_PROVIDER=ollama
+export SELFHUB_CHAT_PROVIDER=ollama
 export OLLAMA_BASE_URL=http://localhost:11434
-export SELFHUB_LLM_MODEL=llama3.1:8b
+export SELFHUB_CHAT_MODEL=qwen2.5:14b
+```
+
+## Console Mode
+
+Run:
+
+```bash
+selfhub console
+```
+
+In console mode:
+
+- command mode accepts normal commands (`read`, `save`, `status`, ...)
+- `/chat` switches to conversational agent mode
+- `/unchat` returns to command mode
+- chat mode supports explicit save intents like `save this: ...` and `yes save that`
 ```
 
 ## Current Status

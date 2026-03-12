@@ -10,7 +10,8 @@ from typing import Annotated
 import click
 import typer
 
-from selfhub_cli.runtime import resolve_repo_path, resolve_save_intelligence
+from selfhub_cli.chat_mode import run_console
+from selfhub_cli.runtime import resolve_chat_client, resolve_repo_path, resolve_save_intelligence
 from selfhub_cli.secrets import (
     SECRET_GITHUB_TOKEN,
     SECRET_OPENROUTER_API_KEY,
@@ -25,6 +26,7 @@ app = typer.Typer(help="SelfHub CLI")
 COMMAND_NAMES: tuple[str, ...] = (
     "init",
     "setup",
+    "console",
     "save",
     "read",
     "status",
@@ -36,6 +38,7 @@ COMMAND_NAMES: tuple[str, ...] = (
 OPTION_COMMAND_ALIASES: dict[str, str] = {
     "--init": "init",
     "--setup": "setup",
+    "--console": "console",
     "--save": "save",
     "--read": "read",
     "--status": "status",
@@ -201,7 +204,7 @@ def setup_command(
 
     _print_step(
         1,
-        4,
+        5,
         "Workspace",
         "Choose where your local SelfHub files should live on this machine.",
     )
@@ -211,7 +214,7 @@ def setup_command(
 
     _print_step(
         2,
-        4,
+        5,
         "Repository Connection",
         "Pick how SelfHub should connect your local repo to a remote (if any).",
     )
@@ -247,28 +250,29 @@ def setup_command(
 
     _print_step(
         3,
-        4,
-        "Model Provider",
-        "Choose the model backend for save classification and duplicate detection.",
+        5,
+        "Thinking Model",
+        "Choose the backend model used for save classification and duplicate detection.",
     )
-    provider_default = settings.llm_provider or "skip"
-    model_choice = _choose_option(
-        prompt="Model provider",
+    thinking_provider = _choose_option(
+        prompt="Thinking provider",
         options=PROVIDER_OPTIONS,
-        default_value=provider_default,
+        default_value=settings.thinking_provider or "skip",
     )
 
-    configured_provider: str | None = None
-    configured_model: str | None = None
-    configured_ollama_url: str | None = None
+    configured_thinking_provider: str | None = None
+    configured_thinking_model: str | None = None
+    configured_chat_provider: str | None = None
+    configured_chat_model: str | None = None
+    configured_ollama_url: str | None = settings.ollama_base_url
     key_saved = False
 
-    if model_choice == "openrouter":
-        configured_provider = "openrouter"
+    if thinking_provider == "openrouter":
+        configured_thinking_provider = "openrouter"
         typer.echo("OpenRouter model options (cheap, balanced, premium):")
-        configured_model = _choose_model(
+        configured_thinking_model = _choose_model(
             provider="openrouter",
-            current_model=settings.llm_model,
+            current_model=settings.thinking_model,
         )
         openrouter_key = _resolve_or_prompt_secret(
             secret_name=SECRET_OPENROUTER_API_KEY,
@@ -276,23 +280,63 @@ def setup_command(
         )
         if openrouter_key:
             key_saved = _store_secret(SECRET_OPENROUTER_API_KEY, openrouter_key)
-    elif model_choice == "ollama":
-        configured_provider = "ollama"
+    elif thinking_provider == "ollama":
+        configured_thinking_provider = "ollama"
         typer.echo("Ollama local model options (includes Qwen):")
-        configured_model = _choose_model(
+        configured_thinking_model = _choose_model(
             provider="ollama",
-            current_model=settings.llm_model,
+            current_model=settings.thinking_model,
         )
         configured_ollama_url = typer.prompt(
             "Ollama base URL",
             default=settings.ollama_base_url or "http://localhost:11434",
         ).strip().rstrip("/")
     else:
-        typer.echo("Skipping model configuration for now. You can rerun `selfhub setup` anytime.")
+        typer.echo("Skipping thinking model configuration for now.")
 
     _print_step(
         4,
-        4,
+        5,
+        "Chat Model",
+        "Choose the model used for interactive /chat mode in `selfhub console`.",
+    )
+    chat_default = settings.chat_provider or configured_thinking_provider or "skip"
+    chat_provider = _choose_option(
+        prompt="Chat provider",
+        options=PROVIDER_OPTIONS,
+        default_value=chat_default,
+    )
+    if chat_provider == "openrouter":
+        configured_chat_provider = "openrouter"
+        typer.echo("OpenRouter chat model options:")
+        configured_chat_model = _choose_model(
+            provider="openrouter",
+            current_model=settings.chat_model or settings.thinking_model,
+        )
+        openrouter_key = _resolve_or_prompt_secret(
+            secret_name=SECRET_OPENROUTER_API_KEY,
+            prompt_label="OpenRouter API key",
+        )
+        if openrouter_key:
+            key_saved = _store_secret(SECRET_OPENROUTER_API_KEY, openrouter_key) or key_saved
+    elif chat_provider == "ollama":
+        configured_chat_provider = "ollama"
+        typer.echo("Ollama chat model options (includes Qwen):")
+        configured_chat_model = _choose_model(
+            provider="ollama",
+            current_model=settings.chat_model or settings.thinking_model,
+        )
+        if not configured_ollama_url:
+            configured_ollama_url = typer.prompt(
+                "Ollama base URL",
+                default=settings.ollama_base_url or "http://localhost:11434",
+            ).strip().rstrip("/")
+    else:
+        typer.echo("Skipping chat model configuration for now.")
+
+    _print_step(
+        5,
+        5,
         "Confirmation",
         "Review your choices. Setup will initialize repo structure and persist configuration.",
     )
@@ -301,8 +345,10 @@ def setup_command(
         setup_mode=setup_mode,
         remote_url=remote_url,
         github_owner=github_owner,
-        model_provider=configured_provider,
-        model=configured_model,
+        thinking_provider=configured_thinking_provider,
+        thinking_model=configured_thinking_model,
+        chat_provider=configured_chat_provider,
+        chat_model=configured_chat_model,
         ollama_url=configured_ollama_url,
     )
     proceed = typer.confirm("Apply this setup now?", default=True)
@@ -323,8 +369,10 @@ def setup_command(
 
     settings.repo_path = str(repo_path)
     settings.github_owner = github_owner
-    settings.llm_provider = configured_provider
-    settings.llm_model = configured_model
+    settings.thinking_provider = configured_thinking_provider
+    settings.thinking_model = configured_thinking_model
+    settings.chat_provider = configured_chat_provider
+    settings.chat_model = configured_chat_model
     settings.ollama_base_url = configured_ollama_url
     config_file = save_settings(settings)
 
@@ -341,13 +389,35 @@ def setup_command(
             "config_path": str(config_file),
             "repo_path": str(repo_path),
             "setup_mode": setup_mode,
-            "model_provider": configured_provider,
-            "model": configured_model,
+            "thinking_provider": configured_thinking_provider,
+            "thinking_model": configured_thinking_model,
+            "chat_provider": configured_chat_provider,
+            "chat_model": configured_chat_model,
             "key_saved": key_saved,
             "status": status_result.data,
         },
     }
     _emit(payload, as_json)
+
+
+@app.command("console")
+def console_command(
+    repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
+) -> None:
+    settings = load_settings()
+    resolved_repo_path = resolve_repo_path(repo_path, settings)
+    service = SelfHubService(
+        resolved_repo_path,
+        save_intelligence=resolve_save_intelligence(settings),
+    )
+    chat_client = resolve_chat_client(settings)
+    exit_code = run_console(
+        service=service,
+        execute_command=_run_subcommand_from_console,
+        chat_client=chat_client,
+    )
+    if exit_code != 0:
+        raise typer.Exit(code=exit_code)
 
 
 @app.command("save")
@@ -480,21 +550,14 @@ def search_command(
 def main() -> None:
     raw_args = sys.argv[1:]
     normalized_args, upfront_hint = _normalize_argv(raw_args)
+    if not normalized_args:
+        normalized_args = ["--help"]
     if upfront_hint:
         typer.secho(upfront_hint, fg=typer.colors.YELLOW)
 
-    try:
-        app(
-            args=normalized_args,
-            prog_name="selfhub",
-            standalone_mode=False,
-        )
-    except click.ClickException as exc:
-        exc.show()
-        hint = _build_error_hint(exc, normalized_args)
-        if hint:
-            typer.secho(f"Hint: {hint}", fg=typer.colors.YELLOW)
-        raise SystemExit(exc.exit_code) from exc
+    exit_code = _run_subcommand_from_console(normalized_args)
+    if exit_code != 0:
+        raise SystemExit(exit_code)
 
 
 def _print_step(step_number: int, total_steps: int, title: str, description: str) -> None:
@@ -560,8 +623,10 @@ def _print_summary(
     setup_mode: str,
     remote_url: str | None,
     github_owner: str | None,
-    model_provider: str | None,
-    model: str | None,
+    thinking_provider: str | None,
+    thinking_model: str | None,
+    chat_provider: str | None,
+    chat_model: str | None,
     ollama_url: str | None,
 ) -> None:
     typer.secho("Setup summary:", fg=typer.colors.BRIGHT_WHITE, bold=True)
@@ -571,11 +636,36 @@ def _print_summary(
         typer.echo(f"  remote_url: {remote_url}")
     if github_owner and setup_mode == "github":
         typer.echo(f"  github_owner: {github_owner}")
-    typer.echo(f"  model_provider: {model_provider or 'none'}")
-    if model:
-        typer.echo(f"  model: {model}")
+    typer.echo(f"  thinking_provider: {thinking_provider or 'none'}")
+    if thinking_model:
+        typer.echo(f"  thinking_model: {thinking_model}")
+    typer.echo(f"  chat_provider: {chat_provider or 'none'}")
+    if chat_model:
+        typer.echo(f"  chat_model: {chat_model}")
     if ollama_url:
         typer.echo(f"  ollama_base_url: {ollama_url}")
+
+
+def _run_subcommand_from_console(args: list[str]) -> int:
+    if not args:
+        return 0
+
+    normalized, upfront_hint = _normalize_argv(args)
+    if upfront_hint:
+        typer.secho(upfront_hint, fg=typer.colors.YELLOW)
+    try:
+        app(
+            args=normalized,
+            prog_name="selfhub",
+            standalone_mode=False,
+        )
+        return 0
+    except click.ClickException as exc:
+        exc.show()
+        hint = _build_error_hint(exc, normalized)
+        if hint:
+            typer.secho(f"Hint: {hint}", fg=typer.colors.YELLOW)
+        return exc.exit_code
 
 
 def _default_option_index(options: tuple[ChoiceOption, ...], value: str) -> int:

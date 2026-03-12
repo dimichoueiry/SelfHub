@@ -5,6 +5,7 @@ from pathlib import Path
 
 from selfhub_core.save_intelligence import LLMConfig, LLMSaveIntelligence, SaveIntelligence
 
+from selfhub_cli.chat_models import ChatClient, ChatModelConfig
 from selfhub_cli.secrets import SECRET_OPENROUTER_API_KEY, KeyringSecretStore
 from selfhub_cli.settings import CLISettings, load_settings
 
@@ -21,13 +22,19 @@ def resolve_repo_path(explicit_path: Path | None, settings: CLISettings | None =
 
 def resolve_save_intelligence(settings: CLISettings | None = None) -> SaveIntelligence | None:
     selected = settings or load_settings()
-    provider = os.getenv("SELFHUB_LLM_PROVIDER", "").strip().lower() or (
-        selected.llm_provider or ""
+    provider = (
+        os.getenv("SELFHUB_THINKING_PROVIDER", "").strip().lower()
+        or os.getenv("SELFHUB_LLM_PROVIDER", "").strip().lower()
+        or (selected.thinking_provider or "")
     )
     if not provider:
         return None
 
-    model = os.getenv("SELFHUB_LLM_MODEL", "").strip() or selected.llm_model
+    model = (
+        os.getenv("SELFHUB_THINKING_MODEL", "").strip()
+        or os.getenv("SELFHUB_LLM_MODEL", "").strip()
+        or selected.thinking_model
+    )
 
     if provider == "openrouter":
         api_key: str | None = os.getenv("OPENROUTER_API_KEY", "").strip() or None
@@ -57,6 +64,54 @@ def resolve_save_intelligence(settings: CLISettings | None = None) -> SaveIntell
             ollama_base_url=base_url.rstrip("/"),
         )
         return LLMSaveIntelligence(config)
+
+    return None
+
+
+def resolve_chat_client(settings: CLISettings | None = None) -> ChatClient | None:
+    selected = settings or load_settings()
+    provider = os.getenv("SELFHUB_CHAT_PROVIDER", "").strip().lower() or (
+        selected.chat_provider or selected.thinking_provider or ""
+    )
+    if not provider:
+        return None
+
+    model = (
+        os.getenv("SELFHUB_CHAT_MODEL", "").strip()
+        or selected.chat_model
+        or selected.thinking_model
+    )
+    if not model:
+        return None
+
+    if provider == "openrouter":
+        api_key: str | None = os.getenv("OPENROUTER_API_KEY", "").strip() or None
+        if not api_key:
+            api_key = _load_secret(SECRET_OPENROUTER_API_KEY)
+        if not api_key:
+            return None
+
+        config = ChatModelConfig(
+            provider="openrouter",
+            model=model,
+            openrouter_api_key=api_key,
+            ollama_base_url=None,
+        )
+        return ChatClient(config)
+
+    if provider == "ollama":
+        base_url = (
+            os.getenv("OLLAMA_BASE_URL", "").strip()
+            or selected.ollama_base_url
+            or "http://localhost:11434"
+        ).rstrip("/")
+        config = ChatModelConfig(
+            provider="ollama",
+            model=model,
+            openrouter_api_key=None,
+            ollama_base_url=base_url,
+        )
+        return ChatClient(config)
 
     return None
 

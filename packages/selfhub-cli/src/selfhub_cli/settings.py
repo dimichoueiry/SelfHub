@@ -14,8 +14,10 @@ CONFIG_FILENAME = "config.json"
 class CLISettings:
     repo_path: str | None = None
     github_owner: str | None = None
-    llm_provider: str | None = None
-    llm_model: str | None = None
+    thinking_provider: str | None = None
+    thinking_model: str | None = None
+    chat_provider: str | None = None
+    chat_model: str | None = None
     ollama_base_url: str | None = None
 
 
@@ -47,11 +49,27 @@ def load_settings() -> CLISettings:
     if not isinstance(parsed, dict):
         return CLISettings()
 
+    legacy_llm_provider = _normalized_provider(_as_optional_str(parsed.get("llm_provider")))
+    legacy_llm_model = _as_optional_str(parsed.get("llm_model"))
+
+    thinking_provider = _normalized_provider(_as_optional_str(parsed.get("thinking_provider")))
+    thinking_model = _as_optional_str(parsed.get("thinking_model"))
+    chat_provider = _normalized_provider(_as_optional_str(parsed.get("chat_provider")))
+    chat_model = _as_optional_str(parsed.get("chat_model"))
+
+    # Backward compatibility with earlier config keys.
+    if thinking_provider is None:
+        thinking_provider = legacy_llm_provider
+    if thinking_model is None:
+        thinking_model = legacy_llm_model
+
     return CLISettings(
         repo_path=_as_optional_str(parsed.get("repo_path")),
         github_owner=_as_optional_str(parsed.get("github_owner")),
-        llm_provider=_normalized_provider(_as_optional_str(parsed.get("llm_provider"))),
-        llm_model=_as_optional_str(parsed.get("llm_model")),
+        thinking_provider=thinking_provider,
+        thinking_model=thinking_model,
+        chat_provider=chat_provider,
+        chat_model=chat_model,
         ollama_base_url=_as_optional_str(parsed.get("ollama_base_url")),
     )
 
