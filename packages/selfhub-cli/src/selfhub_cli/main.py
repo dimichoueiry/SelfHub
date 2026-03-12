@@ -30,9 +30,22 @@ def _service(repo_path: Path | None) -> SelfHubService:
 @app.command("init")
 def init_command(
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
+    remote_url: Annotated[str | None, typer.Option(help="Optional git remote URL")] = None,
+    github_owner: Annotated[str | None, typer.Option(help="GitHub owner for bootstrap")] = None,
+    github_token_env: Annotated[
+        str, typer.Option(help="Env var name holding GitHub token")
+    ] = "GITHUB_TOKEN",
+    bootstrap_github: Annotated[
+        bool, typer.Option(help="Create/find GitHub repo before local initialization")
+    ] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    result = _service(repo_path).init_repo()
+    result = _service(repo_path).init_repo(
+        remote_url=remote_url,
+        github_owner=github_owner,
+        github_token_env=github_token_env,
+        bootstrap_github=bootstrap_github,
+    )
     _emit(result.to_dict(), as_json)
 
 
@@ -82,10 +95,11 @@ def log_command(
     file_path: Annotated[
         str | None, typer.Option("--file", help="Optional file path filter")
     ] = None,
+    limit: Annotated[int, typer.Option(help="Maximum number of commits to return")] = 20,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    result = _service(repo_path).log(file_path=file_path)
+    result = _service(repo_path).log(file_path=file_path, limit=limit)
     _emit(result.to_dict(), as_json)
 
 
