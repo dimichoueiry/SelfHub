@@ -185,3 +185,44 @@ def test_save_custom_file_pushes_to_remote_when_configured(tmp_path: Path) -> No
     remote_file = mirror_clone / "custom/roadmap.md"
     assert remote_file.exists()
     assert "My custom roadmap note." in remote_file.read_text(encoding="utf-8")
+
+
+def test_delete_by_index_removes_specific_entry(tmp_path: Path) -> None:
+    repo_path = tmp_path / "selfhub"
+    service = SelfHubService(repo_path)
+    service.init_repo()
+    service.save("First career note", file_path="experiences/career.md")
+    service.save("Second career note", file_path="experiences/career.md")
+
+    deleted = service.delete(file_path="experiences/career.md", index=1)
+
+    assert deleted.success is True
+    assert deleted.data is not None
+    assert deleted.data["deleted_count"] == 1
+    assert deleted.data["commit_sha"] is not None
+    content = (repo_path / "experiences/career.md").read_text(encoding="utf-8")
+    assert "First career note" not in content
+    assert "Second career note" in content
+
+
+def test_delete_contains_can_prompt_or_delete_all(tmp_path: Path) -> None:
+    repo_path = tmp_path / "selfhub"
+    service = SelfHubService(repo_path)
+    service.init_repo()
+    service.save("OpenLearn is one of my projects", file_path="experiences/career.md")
+    service.save("OpenLearn-Trace is another project", file_path="experiences/career.md")
+
+    pending = service.delete(file_path="experiences/career.md", contains="openlearn")
+    assert pending.success is False
+    assert pending.data is not None
+    assert pending.data["needs_delete_confirmation"] is True
+
+    resolved = service.delete(
+        file_path="experiences/career.md",
+        contains="openlearn",
+        delete_all=True,
+    )
+    assert resolved.success is True
+    content = (repo_path / "experiences/career.md").read_text(encoding="utf-8")
+    assert "OpenLearn is one of my projects" not in content
+    assert "OpenLearn-Trace is another project" not in content

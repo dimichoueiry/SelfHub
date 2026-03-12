@@ -89,6 +89,7 @@ selfhub console
 In console mode:
 
 - command mode accepts normal commands (`read`, `save`, `status`, ...)
+- use `selfhub delete --file <path> --index <n>` to remove a bad saved bullet entry
 - `/chat` switches to conversational agent mode
 - `/unchat` returns to command mode
 - `/save <content>` in chat mode saves immediately

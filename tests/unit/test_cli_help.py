@@ -8,6 +8,7 @@ def test_cli_help_contains_commands() -> None:
     assert result.exit_code == 0
     assert "init" in result.stdout
     assert "save" in result.stdout
+    assert "delete" in result.stdout
     assert "search" in result.stdout
     assert "setup" in result.stdout
     assert "console" in result.stdout

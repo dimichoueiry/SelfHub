@@ -275,6 +275,152 @@ class SelfHubService:
         except GitCommandError as exc:
             return SaveResult(success=False, message=str(exc), data={"stderr": exc.stderr})
 
+    def delete(
+        self,
+        file_path: str,
+        index: int | None = None,
+        contains: str | None = None,
+        delete_all: bool = False,
+        tool_name: str = "SelfHub CLI",
+    ) -> CommandResult:
+        if not is_git_repo(self.repo_path):
+            return CommandResult(
+                success=False,
+                message=(
+                    f"No git repository found at {self.repo_path}. "
+                    "Run 'selfhub init' first."
+                ),
+            )
+
+        has_index = index is not None
+        has_contains = contains is not None and bool(contains.strip())
+        if has_index == has_contains:
+            return CommandResult(
+                success=False,
+                message="Provide exactly one selector: --index or --contains.",
+            )
+
+        normalized_target = file_path.strip().lstrip("/")
+        safe_target = self._safe_target_path(normalized_target)
+        if safe_target is None:
+            return CommandResult(success=False, message="Invalid target file path.")
+        if not safe_target.exists():
+            return CommandResult(success=False, message=f"Path not found: {file_path}")
+        if safe_target.is_dir():
+            return CommandResult(
+                success=False,
+                message=f"Expected a file path, got directory: {file_path}",
+            )
+
+        try:
+            self._sync_before_write()
+        except GitCommandError as exc:
+            return CommandResult(success=False, message=str(exc), data={"stderr": exc.stderr})
+
+        parsed_entries = self._parse_entries(safe_target)
+        if not parsed_entries:
+            return CommandResult(
+                success=False,
+                message=f"No bullet entries found in /{normalized_target}.",
+            )
+
+        selected_entries: list[ParsedEntry]
+        if has_index:
+            assert index is not None
+            if index <= 0:
+                return CommandResult(
+                    success=False,
+                    message="--index must be a positive 1-based value.",
+                )
+            if index > len(parsed_entries):
+                entry_count = len(parsed_entries)
+                noun = "entry" if entry_count == 1 else "entries"
+                return CommandResult(
+                    success=False,
+                    message=(
+                        f"--index {index} is out of range. "
+                        f"File has {entry_count} bullet {noun}."
+                    ),
+                )
+            selected_entries = [parsed_entries[index - 1]]
+        else:
+            assert contains is not None
+            needle = contains.strip().lower()
+            selected_entries = [entry for entry in parsed_entries if needle in entry.text.lower()]
+            if not selected_entries:
+                return CommandResult(
+                    success=False,
+                    message=(
+                        f"No entries containing '{contains.strip()}' "
+                        f"were found in /{normalized_target}."
+                    ),
+                )
+            if len(selected_entries) > 1 and not delete_all:
+                matches = [
+                    {"index": parsed_entries.index(entry) + 1, "entry": entry.text}
+                    for entry in selected_entries
+                ]
+                return CommandResult(
+                    success=False,
+                    message=(
+                        f"Found {len(selected_entries)} matching entries in /{normalized_target}. "
+                        "Use --index for one specific entry or pass --all."
+                    ),
+                    data={
+                        "needs_delete_confirmation": True,
+                        "target_file": normalized_target,
+                        "matches": matches,
+                    },
+                )
+
+        lines = safe_target.read_text(encoding="utf-8").splitlines()
+        line_indexes = {entry.line_index for entry in selected_entries}
+        kept_lines = [line for idx, line in enumerate(lines) if idx not in line_indexes]
+        updated_content = "\n".join(kept_lines).rstrip()
+        safe_target.write_text(f"{updated_content}\n", encoding="utf-8")
+
+        try:
+            stage_all(self.repo_path)
+            if not has_staged_changes(self.repo_path):
+                return CommandResult(
+                    success=True,
+                    message=f"No changes detected for /{normalized_target}.",
+                    data={
+                        "file_path": f"/{normalized_target}",
+                        "deleted_count": len(selected_entries),
+                        "commit_sha": current_head(self.repo_path),
+                    },
+                )
+
+            commit_sha = commit(self.repo_path, f"[SelfHub] delete via {tool_name}")
+
+            push_warning: str | None = None
+            if has_remote(self.repo_path):
+                try:
+                    push(self.repo_path, set_upstream=not has_upstream(self.repo_path))
+                except GitCommandError:
+                    push_warning = "Deleted locally; remote push failed. Run 'selfhub sync' later."
+
+            message = (
+                f"Deleted {len(selected_entries)} entr"
+                f"{'y' if len(selected_entries) == 1 else 'ies'} from /{normalized_target}."
+            )
+            if push_warning:
+                message = f"{message} {push_warning}"
+
+            return CommandResult(
+                success=True,
+                message=message,
+                data={
+                    "file_path": f"/{normalized_target}",
+                    "deleted_count": len(selected_entries),
+                    "deleted_entries": [entry.text for entry in selected_entries],
+                    "commit_sha": commit_sha,
+                },
+            )
+        except GitCommandError as exc:
+            return CommandResult(success=False, message=str(exc), data={"stderr": exc.stderr})
+
     def read(self, target: str | None = None) -> CommandResult:
         if not self.repo_path.exists():
             return CommandResult(

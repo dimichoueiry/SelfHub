@@ -34,6 +34,7 @@ COMMAND_NAMES: tuple[str, ...] = (
     "setup",
     "console",
     "save",
+    "delete",
     "read",
     "status",
     "sync",
@@ -46,6 +47,7 @@ OPTION_COMMAND_ALIASES: dict[str, str] = {
     "--setup": "setup",
     "--console": "console",
     "--save": "save",
+    "--delete": "delete",
     "--read": "read",
     "--status": "status",
     "--sync": "sync",
@@ -490,6 +492,90 @@ def save_command(
             continue
 
         break
+
+    _emit(result.to_dict(), as_json)
+
+
+@app.command("delete")
+def delete_command(
+    file_path: Annotated[
+        str,
+        typer.Option(
+            "--file",
+            help="Target markdown file path for entry deletion",
+        ),
+    ],
+    index: Annotated[
+        int | None,
+        typer.Option(help="1-based bullet entry index to delete"),
+    ] = None,
+    contains: Annotated[
+        str | None,
+        typer.Option(help="Delete entry containing this text"),
+    ] = None,
+    delete_all: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="When used with --contains, delete all matching entries",
+        ),
+    ] = False,
+    tool_name: Annotated[str, typer.Option(help="Tool name attributed in commit metadata")] = (
+        "SelfHub CLI"
+    ),
+    repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
+) -> None:
+    service = _service(repo_path)
+    result = service.delete(
+        file_path=file_path,
+        index=index,
+        contains=contains,
+        delete_all=delete_all,
+        tool_name=tool_name,
+    )
+
+    interactive = (not as_json) and sys.stdin.isatty()
+    while interactive and not result.success:
+        data = result.data
+        if not data:
+            break
+        if data.get("needs_delete_confirmation") is not True:
+            break
+
+        matches_obj = data.get("matches")
+        if not isinstance(matches_obj, list) or not matches_obj:
+            break
+
+        typer.echo("Multiple matches found:")
+        for item in matches_obj:
+            if not isinstance(item, dict):
+                continue
+            raw_index = item.get("index")
+            raw_entry = item.get("entry")
+            if isinstance(raw_index, int) and isinstance(raw_entry, str):
+                typer.echo(f"  [{raw_index}] {raw_entry}")
+
+        choice = typer.prompt(
+            "Delete which entry? Enter index or 'all'",
+            default=str(matches_obj[0].get("index", 1)),
+        ).strip()
+        if choice.lower() == "all":
+            result = service.delete(
+                file_path=file_path,
+                contains=contains,
+                delete_all=True,
+                tool_name=tool_name,
+            )
+            continue
+        if not choice.isdigit():
+            typer.echo("Invalid choice. Please enter a numeric index or 'all'.")
+            raise typer.Exit(code=1)
+        result = service.delete(
+            file_path=file_path,
+            index=int(choice),
+            tool_name=tool_name,
+        )
 
     _emit(result.to_dict(), as_json)
 
