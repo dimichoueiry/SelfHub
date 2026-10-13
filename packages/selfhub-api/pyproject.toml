@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "selfhub-api"
+version = "0.1.0"
+description = "HTTP API for the SelfHub company-brain dashboard"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "SelfHub" }]
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "selfhub-core>=0.1.0",
+    "selfhub-cli>=0.1.0",
+]
+
+[project.scripts]
+selfhub-api = "selfhub_api.app:main"
+selfhub-demo-seed = "selfhub_api.demo:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/selfhub_api"]

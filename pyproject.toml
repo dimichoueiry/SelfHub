@@ -10,6 +10,7 @@ dev = [
   "pre-commit>=3.8.0",
   "pytest>=8.3.0",
   "ruff>=0.11.0",
+  "httpx>=0.27.0",
 ]
 
 [tool.uv.workspace]
@@ -18,6 +19,7 @@ members = ["packages/*"]
 [tool.uv.sources]
 selfhub-core = { workspace = true }
 selfhub-cli = { workspace = true }
+selfhub-api = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -34,7 +36,7 @@ indent-style = "space"
 python_version = "3.12"
 strict = true
 warn_unused_configs = true
-mypy_path = ["packages/selfhub-core/src", "packages/selfhub-cli/src"]
+mypy_path = ["packages/selfhub-core/src", "packages/selfhub-cli/src", "packages/selfhub-api/src"]
 
 [[tool.mypy.overrides]]
 module = ["typer", "typer.*"]
