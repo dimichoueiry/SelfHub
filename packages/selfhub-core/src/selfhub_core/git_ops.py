@@ -99,19 +99,20 @@ def has_staged_changes(repo_path: Path) -> bool:
     return process.returncode == 1
 
 
-def commit(repo_path: Path, message: str) -> str:
-    run_git(
-        [
-            "-c",
-            "user.name=SelfHub",
-            "-c",
-            "user.email=noreply@selfhub.local",
-            "commit",
-            "-m",
-            message,
-        ],
-        cwd=repo_path,
-    )
+def git_user_name(repo_path: Path) -> str | None:
+    try:
+        return run_git(["config", "user.name"], cwd=repo_path).stdout or None
+    except GitCommandError:
+        return None
+
+
+def commit(repo_path: Path, message: str, as_user: bool = False) -> str:
+    # Shared spaces need to know who changed what, so they commit as the person's own git
+    # identity when one is configured. The personal repo keeps the SelfHub identity.
+    identity: list[str] = []
+    if not (as_user and git_user_name(repo_path)):
+        identity = ["-c", "user.name=SelfHub", "-c", "user.email=noreply@selfhub.local"]
+    run_git([*identity, "commit", "-m", message], cwd=repo_path)
     head = current_head(repo_path)
     if head is None:
         raise GitCommandError("Unable to resolve commit SHA after commit")
@@ -126,6 +127,14 @@ def push(repo_path: Path, remote: str = "origin", set_upstream: bool = False) ->
     else:
         command.extend([remote, branch])
     run_git(command, cwd=repo_path)
+
+
+def switch_new_branch(repo_path: Path, branch: str) -> None:
+    run_git(["switch", "-c", branch], cwd=repo_path)
+
+
+def switch_branch(repo_path: Path, branch: str) -> None:
+    run_git(["switch", branch], cwd=repo_path)
 
 
 def pull(repo_path: Path) -> str:

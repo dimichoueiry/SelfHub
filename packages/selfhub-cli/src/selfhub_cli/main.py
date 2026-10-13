@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from selfhub_core.spaces import Space, SpaceError
 
 from selfhub_cli.chat_mode import run_console
 from selfhub_cli.runtime import (
@@ -29,7 +30,7 @@ from selfhub_cli.secrets import (
     SecretStoreError,
 )
 from selfhub_cli.service import SelfHubService
-from selfhub_cli.settings import load_settings, save_settings
+from selfhub_cli.settings import config_dir, load_settings, save_settings
 from selfhub_cli.tool_catalog import (
     CLI_TOOLS,
     SLASH_TOOLS,
@@ -37,6 +38,7 @@ from selfhub_cli.tool_catalog import (
     build_agent_system_prompt,
     build_tools_payload,
 )
+from selfhub_cli.workspace import Workspace
 
 app = typer.Typer(help="SelfHub CLI")
 console = Console()
@@ -55,6 +57,11 @@ COMMAND_NAMES: tuple[str, ...] = (
     "sync",
     "log",
     "search",
+    "space",
+    "context",
+    "learn",
+    "rules",
+    "policy",
 )
 
 OPTION_COMMAND_ALIASES: dict[str, str] = {
@@ -190,9 +197,15 @@ def _emit(payload: dict[str, object], as_json: bool) -> None:
             typer.echo("Done.")
 
 
-def _service(repo_path: Path | None) -> SelfHubService:
+def _service(repo_path: Path | None, space: str | None = None) -> SelfHubService:
     settings = load_settings()
     root = resolve_repo_path(repo_path, settings)
+    if space:
+        try:
+            return _space_service(_workspace(repo_path).find(space))
+        except SpaceError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(code=1) from exc
     intelligence = resolve_save_intelligence(settings)
     semantic_search = resolve_semantic_search(root, settings)
     return SelfHubService(
@@ -200,6 +213,27 @@ def _service(repo_path: Path | None) -> SelfHubService:
         save_intelligence=intelligence,
         semantic_search=semantic_search,
     )
+
+
+def _space_service(space: Space) -> SelfHubService:
+    settings = load_settings()
+    return SelfHubService(
+        space.path,
+        save_intelligence=resolve_save_intelligence(settings),
+        semantic_search=resolve_semantic_search(space.path, settings),
+        manifest=None if space.kind == "personal" else space.manifest,
+    )
+
+
+def _workspace(repo_path: Path | None = None) -> Workspace:
+    root = resolve_repo_path(repo_path, load_settings())
+    return Workspace(config_dir(), root, service_factory=_space_service)
+
+
+SpaceOption = Annotated[
+    str | None,
+    typer.Option("--space", help="Connected space to use (default: your personal SelfHub)"),
+]
 
 
 @app.command("init")
@@ -461,10 +495,11 @@ def save_command(
     on_duplicate: Annotated[
         str | None, typer.Option(help="Duplicate behavior: add | update")
     ] = None,
+    space: SpaceOption = None,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    service = _service(repo_path)
+    service = _service(repo_path, space)
     result = service.save(
         content=content,
         file_path=file_path,
@@ -546,10 +581,11 @@ def delete_command(
     tool_name: Annotated[str, typer.Option(help="Tool name attributed in commit metadata")] = (
         "SelfHub CLI"
     ),
+    space: SpaceOption = None,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    service = _service(repo_path)
+    service = _service(repo_path, space)
     result = service.delete(
         file_path=file_path,
         index=index,
@@ -627,28 +663,31 @@ def agent_spec_command(
 @app.command("read")
 def read_command(
     target: Annotated[str | None, typer.Argument(help="Optional folder or file path")] = None,
+    space: SpaceOption = None,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    result = _service(repo_path).read(target=target)
+    result = _service(repo_path, space).read(target=target)
     _emit(result.to_dict(), as_json)
 
 
 @app.command("status")
 def status_command(
+    space: SpaceOption = None,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    result = _service(repo_path).status()
+    result = _service(repo_path, space).status()
     _emit(result.to_dict(), as_json)
 
 
 @app.command("sync")
 def sync_command(
+    space: SpaceOption = None,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    result = _service(repo_path).sync()
+    result = _service(repo_path, space).sync()
     _emit(result.to_dict(), as_json)
 
 
@@ -658,10 +697,11 @@ def log_command(
         str | None, typer.Option("--file", help="Optional file path filter")
     ] = None,
     limit: Annotated[int, typer.Option(help="Maximum number of commits to return")] = 20,
+    space: SpaceOption = None,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    result = _service(repo_path).log(file_path=file_path, limit=limit)
+    result = _service(repo_path, space).log(file_path=file_path, limit=limit)
     _emit(result.to_dict(), as_json)
 
 
@@ -670,10 +710,11 @@ def search_command(
     query: Annotated[str, typer.Argument(help="Search query")],
     mode: Annotated[str, typer.Option(help="Search mode: exact | semantic | hybrid")] = "hybrid",
     limit: Annotated[int, typer.Option(help="Maximum number of ranked results")] = 8,
+    space: SpaceOption = None,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    results = _service(repo_path).search(query=query, mode=mode, limit=limit)
+    results = _service(repo_path, space).search(query=query, mode=mode, limit=limit)
     payload = {
         "success": True,
         "message": f"Found {len(results)} result(s)",
@@ -687,11 +728,158 @@ def recall_command(
     query: Annotated[str, typer.Argument(help="Question to recall memory for")],
     mode: Annotated[str, typer.Option(help="Search mode: exact | semantic | hybrid")] = "hybrid",
     limit: Annotated[int, typer.Option(help="Maximum number of ranked results")] = 8,
+    space: SpaceOption = None,
     repo_path: Annotated[Path | None, typer.Option(help="Local SelfHub clone path")] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON output")] = False,
 ) -> None:
-    result = _service(repo_path).recall(query=query, mode=mode, limit=limit)
+    result = _service(repo_path, space).recall(query=query, mode=mode, limit=limit)
     _emit(result.to_dict(), as_json)
+
+
+space_app = typer.Typer(help="Connect org, team and client spaces next to your own SelfHub.")
+rules_app = typer.Typer(help="Rules learned from feedback: list, approve, reject.")
+policy_app = typer.Typer(help="Policies your agents follow: list, enable, disable.")
+app.add_typer(space_app, name="space")
+app.add_typer(rules_app, name="rules")
+app.add_typer(policy_app, name="policy")
+
+JsonOption = Annotated[bool, typer.Option("--json", help="Emit JSON output")]
+RepoOption = Annotated[Path | None, typer.Option(help="Local SelfHub clone path")]
+
+
+@space_app.command("create")
+def space_create_command(
+    path: Annotated[Path, typer.Argument(help="Folder for the new space repo")],
+    name: Annotated[str, typer.Option(help="Space name, e.g. 'Northline' or 'Apex Roofing'")],
+    kind: Annotated[str, typer.Option(help="org | team | client")],
+    owner: Annotated[
+        list[str] | None,
+        typer.Option(help="GitHub owner of locked paths, e.g. @northline/admins (repeatable)"),
+    ] = None,
+    alias: Annotated[
+        list[str] | None, typer.Option(help="Other names it is called by (repeatable)")
+    ] = None,
+    remote_url: Annotated[str | None, typer.Option(help="Optional git remote URL")] = None,
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    result = _workspace(repo_path).create_space(
+        path, name=name, kind=kind, owners=owner or [], aliases=alias or [], remote_url=remote_url
+    )
+    _emit(result.to_dict(), as_json)
+
+
+@space_app.command("add")
+def space_add_command(
+    source: Annotated[str, typer.Argument(help="Path or git URL of an existing space")],
+    name: Annotated[str | None, typer.Option(help="Local name (default: its own name)")] = None,
+    into: Annotated[Path | None, typer.Option(help="Where to clone a URL")] = None,
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    result = _workspace(repo_path).add_space(source, name=name, into=into)
+    _emit(result.to_dict(), as_json)
+
+
+@space_app.command("list")
+def space_list_command(repo_path: RepoOption = None, as_json: JsonOption = False) -> None:
+    _emit(_workspace(repo_path).list_spaces().to_dict(), as_json)
+
+
+@space_app.command("remove")
+def space_remove_command(
+    name: Annotated[str, typer.Argument(help="Space to disconnect (files are kept)")],
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    _emit(_workspace(repo_path).remove_space(name).to_dict(), as_json)
+
+
+@space_app.command("sync")
+def space_sync_command(repo_path: RepoOption = None, as_json: JsonOption = False) -> None:
+    _emit(_workspace(repo_path).sync_spaces().to_dict(), as_json)
+
+
+@app.command("context")
+def context_command(
+    task: Annotated[str, typer.Argument(help="What the agent is about to do")],
+    client: Annotated[
+        list[str] | None,
+        typer.Option(help="Load this client even if the task doesn't name it (repeatable)"),
+    ] = None,
+    limit: Annotated[int, typer.Option(help="Relevant excerpts per space")] = 5,
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    result = _workspace(repo_path).context(task, clients=client or [], limit=limit)
+    _emit(result.to_dict(), as_json)
+
+
+@app.command("learn")
+def learn_command(
+    rule: Annotated[str, typer.Argument(help="The rule, as one instruction")],
+    space: SpaceOption = None,
+    why: Annotated[str, typer.Option(help="The feedback that led to it")] = "",
+    source: Annotated[str, typer.Option(help="The deliverable it came from")] = "",
+    title: Annotated[str | None, typer.Option(help="Short title")] = None,
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    result = _workspace(repo_path).learn(rule, space, why=why, source=source, title=title)
+    _emit(result.to_dict(), as_json)
+
+
+@rules_app.command("list")
+def rules_list_command(
+    space: SpaceOption = None,
+    pending: Annotated[bool, typer.Option(help="Show rules waiting for approval")] = False,
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    _emit(_workspace(repo_path).list_rules(space, pending=pending).to_dict(), as_json)
+
+
+@rules_app.command("approve")
+def rules_approve_command(
+    rule_id: Annotated[str, typer.Argument(help="Rule id, e.g. R-20261012-3f9a")],
+    space: SpaceOption = None,
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    _emit(_workspace(repo_path).approve(rule_id, space).to_dict(), as_json)
+
+
+@rules_app.command("reject")
+def rules_reject_command(
+    rule_id: Annotated[str, typer.Argument(help="Rule id, e.g. R-20261012-3f9a")],
+    space: SpaceOption = None,
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    _emit(_workspace(repo_path).reject(rule_id, space).to_dict(), as_json)
+
+
+@policy_app.command("list")
+def policy_list_command(repo_path: RepoOption = None, as_json: JsonOption = False) -> None:
+    _emit(_workspace(repo_path).policies().to_dict(), as_json)
+
+
+@policy_app.command("enable")
+def policy_enable_command(
+    name: Annotated[str, typer.Argument(help="Policy name (see `selfhub policy list`)")],
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    _emit(_workspace(repo_path).set_policy(name, on=True).to_dict(), as_json)
+
+
+@policy_app.command("disable")
+def policy_disable_command(
+    name: Annotated[str, typer.Argument(help="Policy name (see `selfhub policy list`)")],
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    _emit(_workspace(repo_path).set_policy(name, on=False).to_dict(), as_json)
 
 
 def main() -> None:

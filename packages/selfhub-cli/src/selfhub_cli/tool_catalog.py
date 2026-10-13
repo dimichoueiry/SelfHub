@@ -86,6 +86,36 @@ CLI_TOOLS: tuple[ToolSpec, ...] = (
         purpose="Inspect recent commit history.",
     ),
     ToolSpec(
+        name="context",
+        usage="selfhub context \"<task>\" [--client <name>] [--json]",
+        purpose=(
+            "Everything an agent needs for one task across connected spaces: locked rules, "
+            "precedence, the named client only, learned rules, policies and sources."
+        ),
+    ),
+    ToolSpec(
+        name="learn",
+        usage=(
+            "selfhub learn \"<rule>\" --space <name> [--why <feedback>] [--source <path>]"
+        ),
+        purpose="Turn feedback into a rule. It waits for human approval unless policy says not.",
+    ),
+    ToolSpec(
+        name="rules",
+        usage="selfhub rules list|approve|reject [<id>] [--space <name>] [--pending]",
+        purpose="List learned rules; humans approve or reject proposed ones.",
+    ),
+    ToolSpec(
+        name="space",
+        usage="selfhub space create|add|list|remove|sync",
+        purpose="Connect org, team and client SelfHub repos next to your personal one.",
+    ),
+    ToolSpec(
+        name="policy",
+        usage="selfhub policy list|enable|disable [<name>]",
+        purpose="Choose the policies your agents follow; org-enforced ones stay on.",
+    ),
+    ToolSpec(
         name="console",
         usage="selfhub console",
         purpose="Open interactive command/chat shell.",
@@ -126,6 +156,12 @@ GROUNDING_RULES: tuple[str, ...] = (
     "Ground answers in retrieved evidence; avoid unsupported assumptions.",
     "If no relevant evidence is found, explicitly say memory is missing and ask user to save it.",
     "For new durable personal facts, call `selfhub save`.",
+    "Before doing work for someone (an ad, a doc, a plan), run `selfhub context \"<task>\"` "
+    "and follow it: locked rules win, then the user, then client, team, org, personal.",
+    "Never use one client's memory on another client's work. Only clients in the context "
+    "bundle may be used.",
+    "Never write to locked paths and never run `selfhub rules approve`: approval is human.",
+    "Pass --space <name> to save/read/search/recall in a shared space.",
 )
 
 AGENT_WORKFLOWS: tuple[WorkflowSpec, ...] = (
@@ -148,6 +184,29 @@ AGENT_WORKFLOWS: tuple[WorkflowSpec, ...] = (
             ),
             "If save asks for resolution, follow suggested file or duplicate prompts",
             "Confirm saved file path and commit id back to the user",
+        ),
+    ),
+    WorkflowSpec(
+        name="work_task",
+        when="User asks for work that follows company SOPs, e.g. 'make an ad for client A'.",
+        steps=(
+            "Run: selfhub context \"<the task, naming the client>\" --json",
+            "Read in full any listed file you rely on: selfhub read <path> --space <space>",
+            "Do the work. Obey locked rules and policies; follow precedence on conflicts",
+            "Finish with the sources you used (space:path)",
+        ),
+    ),
+    WorkflowSpec(
+        name="feedback_to_rule",
+        when="User or reviewer says an output was wrong, bad or off-brand.",
+        steps=(
+            "Write one rule that would have prevented it, as a direct instruction",
+            "Pick the narrowest space: the client if it is client-specific, else team, else org",
+            (
+                "Run: selfhub learn \"<rule>\" --space <space> --why \"<their feedback>\" "
+                "--source <deliverable path>"
+            ),
+            "Tell the user the rule id and whether it applies now or waits for approval",
         ),
     ),
 )

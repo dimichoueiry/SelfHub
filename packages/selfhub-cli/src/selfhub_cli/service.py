@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +16,7 @@ from selfhub_core.git_ops import (
     add_remote,
     clone_repo,
     commit,
+    current_branch,
     current_head,
     get_log,
     get_status,
@@ -25,6 +28,8 @@ from selfhub_core.git_ops import (
     pull,
     push,
     stage_all,
+    switch_branch,
+    switch_new_branch,
 )
 from selfhub_core.github_api import GitHubApiError, GitHubBootstrapClient
 from selfhub_core.save_intelligence import (
@@ -33,6 +38,7 @@ from selfhub_core.save_intelligence import (
     SaveIntelligenceError,
     build_default_save_intelligence,
 )
+from selfhub_core.spaces import SpaceManifest, is_locked, slug
 
 
 @dataclass(slots=True)
@@ -52,10 +58,13 @@ class SelfHubService:
         repo_path: Path,
         save_intelligence: SaveIntelligence | None = None,
         semantic_search: SemanticSearchBackend | None = None,
+        manifest: SpaceManifest | None = None,
     ) -> None:
         self.repo_path = repo_path
         self.save_intelligence = save_intelligence or build_default_save_intelligence()
         self.semantic_search = semantic_search
+        # Set for shared spaces (org/team/client): decides locked paths and how writes land.
+        self.manifest = manifest
 
     def init_repo(
         self,
@@ -190,6 +199,10 @@ class SelfHubService:
 
         assert resolved_target is not None
 
+        refusal = self.write_refusal(resolved_target)
+        if refusal:
+            return SaveResult(success=False, message=refusal, action_taken="refused")
+
         safe_target = self._safe_target_path(resolved_target)
         if safe_target is None:
             return SaveResult(success=False, message="Invalid target file path.")
@@ -253,14 +266,10 @@ class SelfHubService:
                     data={"classification": classification},
                 )
 
-            commit_sha = commit(self.repo_path, f"[SelfHub] {action} via {tool_name}")
-
-            push_warning: str | None = None
-            if has_remote(self.repo_path):
-                try:
-                    push(self.repo_path, set_upstream=not has_upstream(self.repo_path))
-                except GitCommandError:
-                    push_warning = "Saved locally; remote push failed. Run 'selfhub sync' later."
+            commit_sha, push_warning = self.publish(
+                f"[SelfHub] {action} via {tool_name}",
+                failed_push_note="Saved locally; remote push failed. Run 'selfhub sync' later.",
+            )
 
             message = f"Saved to /{resolved_target}."
             if push_warning:
@@ -309,6 +318,9 @@ class SelfHubService:
             )
 
         normalized_target = file_path.strip().lstrip("/")
+        refusal = self.write_refusal(normalized_target)
+        if refusal:
+            return CommandResult(success=False, message=refusal)
         safe_target = self._safe_target_path(normalized_target)
         if safe_target is None:
             return CommandResult(success=False, message="Invalid target file path.")
@@ -400,14 +412,10 @@ class SelfHubService:
                     },
                 )
 
-            commit_sha = commit(self.repo_path, f"[SelfHub] delete via {tool_name}")
-
-            push_warning: str | None = None
-            if has_remote(self.repo_path):
-                try:
-                    push(self.repo_path, set_upstream=not has_upstream(self.repo_path))
-                except GitCommandError:
-                    push_warning = "Deleted locally; remote push failed. Run 'selfhub sync' later."
+            commit_sha, push_warning = self.publish(
+                f"[SelfHub] delete via {tool_name}",
+                failed_push_note="Deleted locally; remote push failed. Run 'selfhub sync' later.",
+            )
 
             message = (
                 f"Deleted {len(selected_entries)} entr"
@@ -787,6 +795,65 @@ class SelfHubService:
             return None
         return SearchResult(path=f"/{rel_path}", excerpt=excerpt, score=best_score)
 
+    def prepare_write(self) -> None:
+        """Catch up with the remote before writing, as save and delete do."""
+        self._sync_before_write()
+
+    def write_refusal(self, rel_path: str) -> str | None:
+        """Why a write to this path is not allowed here, or None when it is."""
+        if self.manifest is None:
+            return None
+        if self.manifest.write_policy == "read-only":
+            return f"Space '{self.manifest.name}' is read-only. Nothing was written."
+        if is_locked(self.manifest, rel_path):
+            owners = ", ".join(self.manifest.owners) or "the space owners"
+            return (
+                f"/{rel_path.lstrip('/')} is locked in space '{self.manifest.name}'. "
+                f"Only {owners} can change it, through a reviewed pull request. "
+                "Nothing was written."
+            )
+        return None
+
+    def publish(self, message: str, failed_push_note: str) -> tuple[str, str | None]:
+        """Commit what is staged and send it where this space's write policy says.
+
+        direct: commit on the current branch and push.
+        pull-request: commit on a new branch, push it, open a PR when `gh` is available,
+        and switch back, so the main branch only changes once a reviewer merges.
+        """
+        shared = self.manifest is not None
+        if not shared or self.manifest is None or self.manifest.write_policy != "pull-request":
+            sha = commit(self.repo_path, message, as_user=shared)
+            if has_remote(self.repo_path):
+                try:
+                    push(self.repo_path, set_upstream=not has_upstream(self.repo_path))
+                except GitCommandError:
+                    return sha, failed_push_note
+            return sha, None
+
+        base = current_branch(self.repo_path)
+        stamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+        branch = f"selfhub/{slug(message.removeprefix('[SelfHub] '))[:40]}-{stamp}"
+        switch_new_branch(self.repo_path, branch)
+        try:
+            sha = commit(self.repo_path, message, as_user=True)
+            note = f"Proposed on branch {branch}; it lands on {base} once a reviewer merges it."
+            if has_remote(self.repo_path):
+                try:
+                    push(self.repo_path, set_upstream=True)
+                    pr_url = _open_pull_request(self.repo_path, base, message)
+                    if pr_url:
+                        note = f"Opened a pull request for review: {pr_url}"
+                    else:
+                        note = f"{note} Open a pull request from {branch} to {base}."
+                except GitCommandError:
+                    note = f"{note} Pushing the branch failed; run 'git push' in {self.repo_path}."
+            else:
+                note = f"{note} No remote, so it stays local."
+        finally:
+            switch_branch(self.repo_path, base)
+        return sha, note
+
     def _ensure_local_repo(self, remote_url: str | None) -> bool:
         if remote_url:
             if not self.repo_path.exists():
@@ -1034,6 +1101,26 @@ def _excerpt_around(lines: list[str], center: int, radius: int = 1) -> str:
     if len(excerpt) <= 280:
         return excerpt
     return f"{excerpt[:277].rstrip()}..."
+
+
+def _open_pull_request(repo_path: Path, base: str, title: str) -> str | None:
+    """Open a PR with the GitHub CLI when it is installed and signed in. None otherwise."""
+    if shutil.which("gh") is None:
+        return None
+    process = subprocess.run(
+        [
+            "gh", "pr", "create", "--base", base, "--title", title,
+            "--body", "Proposed by SelfHub. Review and merge to apply it.",
+        ],
+        cwd=str(repo_path),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if process.returncode != 0:
+        return None
+    lines = process.stdout.strip().splitlines()
+    return lines[-1] if lines else None
 
 
 def _looks_like_self_summary_query(text: str) -> bool:
