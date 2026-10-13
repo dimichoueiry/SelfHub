@@ -1163,9 +1163,11 @@ class Brain:
     def _my_ids(self, space: Space) -> set[str]:
         me = self.gh.me()
         ids = {me.login, me.name, me.email or ""}
-        # Only on this computer: whoever git says is signed in here is the person asking.
-        # Not in demo mode, where git is set to whoever acted last.
-        if not self.ctx.commit_as_viewer and not has_remote(space.path):
+        # Only on this computer, or not signed in to GitHub here: whoever git says is
+        # signed in on this computer is the person asking. Not in demo mode, where git is
+        # set to whoever acted last.
+        local = not has_remote(space.path) or not getattr(self.gh, "signed_in", True)
+        if not self.ctx.commit_as_viewer and local:
             ids |= {_git_config(space.path, "user.name"), _git_config(space.path, "user.email")}
         return _identities(ids)
 

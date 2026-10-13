@@ -21,7 +21,7 @@ import selfhub_cli.service as cli_service
 from fastapi.testclient import TestClient
 from selfhub_api.app import Settings, create_app
 from selfhub_api.brain import Brain, Context, SpaceLocks
-from selfhub_api.github import GhGitHubProvider
+from selfhub_api.github import GhGitHubProvider, ProviderError
 from selfhub_api.store import Store
 from selfhub_cli.workspace import Workspace
 from selfhub_core.spaces import MANIFEST_PATH, Space, load_manifest
@@ -287,3 +287,32 @@ def test_this_computers_git_identity_counts_only_when_space_is_local(
     # Once on GitHub, only the GitHub identity counts.
     _git(local.path, "remote", "add", "origin", "https://github.com/acme/ui-ux.git")
     assert not _brain(env["tmp"], gh_user)._is_owner(local)
+
+
+def _no_gh(args: list[str]) -> Any:
+    raise ProviderError("gh-missing", "The GitHub CLI isn't installed.", status=503)
+
+
+def test_owner_without_gh_edits_locked_file_in_local_space(env: dict[str, Any]) -> None:
+    """gh missing or logged out: the API falls back to the person on this computer, and
+    their git identity makes them the owner of the space they created here."""
+    env["monkeypatch"].setattr(
+        api_app, "GhGitHubProvider", lambda org_login=None: GhGitHubProvider(org_login, _no_gh))
+    client = TestClient(create_app(Settings(demo=False, config_dir=env["config"],
+                                            personal_path=env["personal"])))
+    repo = _create(client)
+    doc = client.get("/api/spaces/ui-ux/file", params={"path": LOCKED}).json()
+    assert doc["editable"] and doc["owned"] and doc["note"] == LOCAL_NOTE
+    res = client.put("/api/spaces/ui-ux/file", json={"path": LOCKED, "content": "# Mine\n"})
+    assert res.status_code == 200, res.text
+    assert res.json()["outcome"] == "committed"
+    assert (repo / LOCKED).read_text() == "# Mine\n"
+
+
+def test_git_identity_counts_in_connected_space_when_gh_is_missing(env: dict[str, Any]) -> None:
+    space = _space(env["tmp"], ["dimi@example.com"], connected=True)
+    ctx = Context(workspace=Workspace(env["tmp"] / "config", env["tmp"] / "personal"),
+                  store=Store(env["tmp"] / "config"), locks=SpaceLocks(), mode="local")
+    assert Brain(ctx=ctx, gh=GhGitHubProvider(runner=_no_gh))._is_owner(space)
+    # Signed in to GitHub as someone else: the GitHub identity wins.
+    assert not _brain(env["tmp"], SAM)._is_owner(space)

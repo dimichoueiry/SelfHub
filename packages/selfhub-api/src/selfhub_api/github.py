@@ -398,6 +398,12 @@ class GhGitHubProvider:
                               email=raw.get("email"))
         return self._me
 
+    @property
+    def signed_in(self) -> bool:
+        """Whether `me()` is the GitHub account, not the fallback person on this computer."""
+        self.me()
+        return self._me is not None
+
     def org(self) -> tuple[str, str | None]:
         if not self.org_login:
             me = self.me()
