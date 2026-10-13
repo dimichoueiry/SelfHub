@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { AlertCircle, Info, Loader2, Lock, UserMinus, UserPlus, Users } from "lucide-react";
 import type { Member, Role, Space } from "@/lib/api/types";
@@ -11,6 +11,7 @@ import { firstName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { UserAvatar } from "@/components/common/user-avatar";
 import { EmptyState, ErrorState } from "@/components/common/states";
+import { ConnectGitHubDialog } from "@/components/space/connect-github";
 import { RolePill } from "@/components/space/role-pill";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -169,6 +170,8 @@ export function MembersPanel({ space }: { space: Space }) {
     }
   }
 
+  const onlyHere = space.kind !== "personal" && !space.repo && space.sync.state === "no-remote";
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-1">
@@ -187,9 +190,12 @@ export function MembersPanel({ space }: { space: Space }) {
             {space.kind === "personal"
               ? "This is your personal space. Only you can see it, and it can't be shared."
               : !space.repo
-                ? `${space.name} isn't on GitHub yet, so its access can't be shared. Connect it to GitHub first.`
+                ? `${space.name} is only on this computer, so its access can't be shared yet. ${
+                    space.myAccess === "admin" ? "Connect it to GitHub first." : "Ask an admin to connect this space to GitHub."
+                  }`
                 : `Only admins of ${space.name} can change access. Ask ${ownerNames} to add someone.`}
           </p>
+          {onlyHere && space.myAccess === "admin" && <ConnectButton space={space} />}
         </div>
       )}
 
@@ -329,5 +335,18 @@ export function MembersPanel({ space }: { space: Space }) {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+function ConnectButton({ space }: { space: Space }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <Button ref={ref} size="sm" className="ml-auto shrink-0" onClick={() => setOpen(true)}>
+        Connect to GitHub
+      </Button>
+      <ConnectGitHubDialog space={space} open={open} onOpenChange={setOpen} returnFocus={ref} />
+    </>
   );
 }

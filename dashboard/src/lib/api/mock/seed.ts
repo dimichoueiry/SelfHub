@@ -198,7 +198,7 @@ export const seedSpaces: SeedSpace[] = [
     lockedPaths: [],
     listed: false,
     sync: { state: "no-remote", ahead: 0, behind: 0, lastSyncMinutesAgo: null, message: "This space only exists on Maya's computer." },
-    acl: { maya: { role: "admin", via: "direct" }, priya: { role: "read", via: "direct" } },
+    acl: { maya: { role: "admin", via: "direct" }, priya: { role: "read", via: "direct" }, sam: { role: "read", via: "direct" } },
   },
 ];
 

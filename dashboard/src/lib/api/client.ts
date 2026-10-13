@@ -1,11 +1,14 @@
 import type {
   Activity,
   ConnectableRepo,
+  ConnectGitHubResult,
   CreateSpaceInput,
   Diff,
   FileDoc,
+  GitHubCheck,
   HistoryEntry,
   Me,
+  RepoVisibility,
   Member,
   PeopleMatrix,
   Role,
@@ -29,6 +32,10 @@ export interface SelfHubApi {
   createSpace(input: CreateSpaceInput): Promise<Space>;
   deleteSpace(id: string): Promise<void>;
   syncSpace(id: string): Promise<SyncResult>;
+  /** Admins, spaces only on this computer: is gh installed and logged in? */
+  githubCheck(id: string): Promise<GitHubCheck>;
+  /** Create a GitHub repository for the space and send its files there. */
+  connectGitHub(id: string, input: { owner: string; name: string; visibility: RepoVisibility }): Promise<ConnectGitHubResult>;
   tree(id: string): Promise<TreeEntry[]>;
   file(id: string, path: string): Promise<FileDoc>;
   saveFile(id: string, input: SaveFileInput): Promise<SaveFileResult>;

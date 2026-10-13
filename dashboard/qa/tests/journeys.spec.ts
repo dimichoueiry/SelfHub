@@ -97,7 +97,7 @@ test("(e1) Add space: create a new space", async ({ page }) => {
   await expect(page.getByRole("list", { name: "Chosen" }).getByText("Priya Natarajan")).toBeVisible();
   await page.screenshot({ path: shot("e1-1-form") });
   await page.getByRole("button", { name: "Create space" }).click();
-  await expect(page.getByRole("dialog").locator("ol").getByText("Creating it on GitHub")).toBeVisible();
+  await expect(page.getByRole("dialog").locator("ol").getByText("Creating the folder on this computer")).toBeVisible();
   await page.screenshot({ path: shot("e1-2-creating") });
   await expect(page.getByRole("heading", { name: "Ridgeline Plumbing is ready" })).toBeVisible();
   await page.screenshot({ path: shot("e1-3-ready") });

@@ -160,6 +160,15 @@ function buildState(): State {
   };
 }
 
+const ONLY_HERE = "This space is only on this computer. It isn't connected to GitHub.";
+
+/** Sample mode stand-in for gh: set localStorage "selfhub.mock.gh" to "gh-missing" or "logged-out". */
+function mockGhProblem(): "gh-missing" | "logged-out" | null {
+  if (typeof window === "undefined") return null;
+  const v = window.localStorage.getItem("selfhub.mock.gh");
+  return v === "gh-missing" || v === "logged-out" ? v : null;
+}
+
 const wait = (min: number, max: number) =>
   new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
 const read = () => wait(180, 480);
@@ -449,13 +458,14 @@ export function createMockAdapter(): SelfHubApi {
         name,
         kind,
         description: input.description?.trim() || "",
-        repo: { owner: "northline", name: kind === "client" ? `client-${id}` : id },
+        repo: null,
         writePolicy: input.writePolicy ?? (kind === "org" ? "pull-request" : "direct"),
         owners: owners.length ? owners : [me()],
         lockedPaths: kind === "org" ? ["locked/"] : [],
         listed: kind !== "personal",
         personalOf: kind === "personal" ? me() : undefined,
-        sync: { state: "synced", ahead: 0, behind: 0, lastSyncMinutesAgo: 0, message: null },
+        // Like the real API: a new space starts on this computer, not on GitHub.
+        sync: { state: "no-remote", ahead: 0, behind: 0, lastSyncMinutesAgo: null, message: ONLY_HERE },
         acl: { [me()]: { role: "admin", via: "direct" } },
       };
       for (const o of space.owners) if (!space.acl[o]) space.acl[o] = { role: "admin", via: "direct" };
@@ -463,9 +473,52 @@ export function createMockAdapter(): SelfHubApi {
       state.files[space.id] = templates[kind];
       state.commits[space.id] = [];
       for (const [p, c] of Object.entries(templates[kind])) commit(space, p, "", c, `Add ${p}`);
-      state.lastSync[space.id] = new Date().toISOString();
       log("space", space.id, `created ${name}`);
       return toSpace(space);
+    },
+
+    async githubCheck(id) {
+      await wait(500, 900);
+      const s = findSpace(id);
+      requireAccess(s, "admin");
+      if (s.repo) throw new ApiError(409, "already-connected", `${s.name} is already connected to GitHub.`, "Use Sync now to send your latest changes.");
+      const problem = mockGhProblem();
+      return {
+        ready: !problem,
+        problem,
+        login: problem ? null : me(),
+        owners: problem ? [] : [{ login: me(), kind: "user" as const }, { login: "northline", kind: "org" as const }],
+        defaultOwner: problem ? null : "northline",
+        suggestedName: s.kind === "client" ? `client-${s.id}` : s.id,
+        path: `/Users/${me()}/SelfHub/spaces/${s.id}`,
+      };
+    },
+
+    async connectGitHub(id, { owner, name, visibility }) {
+      await wait(1800, 2600);
+      const s = findSpace(id);
+      requireAccess(s, "admin");
+      if (s.repo) throw new ApiError(409, "already-connected", `${s.name} is already connected to GitHub.`, "Use Sync now to send your latest changes.");
+      const problem = mockGhProblem();
+      if (problem === "gh-missing") throw new ApiError(503, "gh-missing", "The GitHub CLI (gh) isn't installed on this computer.", "Install it, log in, then choose Check again.", { problem });
+      if (problem) throw new ApiError(401, "logged-out", "You're not logged in to GitHub on this computer.", "Log in with the GitHub CLI (gh), then choose Check again.", { problem });
+      if (!/^[A-Za-z0-9._-]{1,100}$/.test(name) || name === "." || name === "..") {
+        throw new ApiError(400, "invalid-name", "Repository names can only use letters, numbers, hyphens (-), underscores (_) and dots.");
+      }
+      if (visibility !== "private" && visibility !== "public") throw new ApiError(400, "invalid-visibility", "Choose Private or Public.");
+      const taken = new Set([
+        ...state.spaces.filter((x) => x.repo).map((x) => `${x.repo!.owner}/${x.repo!.name}`),
+        ...connectableRepos.map((r) => r.fullName),
+      ]);
+      if (taken.has(`${owner}/${name}`)) {
+        const other = [2, 3, 4, 5, 6].map((n) => `${name}-${n}`).find((n) => !taken.has(`${owner}/${n}`));
+        throw new ApiError(409, "name-taken", `${owner} already has a repository called ${name} on GitHub.`, other ? `Try ${other}, or pick another name.` : "Pick another name.", other ? { suggestion: other } : undefined);
+      }
+      s.repo = { owner, name };
+      s.sync = { ...s.sync, state: "synced", ahead: 0, behind: 0, message: null };
+      state.lastSync[s.id] = new Date().toISOString();
+      log("space", s.id, `connected ${s.name} to GitHub as ${owner}/${name}`);
+      return { space: toSpace(s), repo: { owner, name, url: `https://github.com/${owner}/${name}` } };
     },
 
     async deleteSpace(id) {

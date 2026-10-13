@@ -66,6 +66,27 @@ export type CreateSpaceInput =
       writePolicy?: WritePolicy;
     };
 
+/** GET /spaces/{id}/github: can this computer put the space on GitHub? */
+export interface GitHubCheck {
+  ready: boolean;
+  /** Why not: the GitHub CLI (gh) isn't installed, or it isn't logged in. */
+  problem: "gh-missing" | "logged-out" | null;
+  login: string | null;
+  /** Your GitHub account first, then the organizations you belong to. */
+  owners: { login: string; kind: "user" | "org" }[];
+  defaultOwner: string | null;
+  suggestedName: string;
+  /** Absolute path of the space's folder on this computer. */
+  path: string;
+}
+
+export type RepoVisibility = "private" | "public";
+
+export interface ConnectGitHubResult {
+  space: Space;
+  repo: { owner: string; name: string; url: string };
+}
+
 export type SyncResultKind = "up-to-date" | "pulled" | "pushed" | "conflict" | "error" | "local-changes" | "saved" | "pull-request";
 
 export interface SyncResult {

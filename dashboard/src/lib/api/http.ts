@@ -83,6 +83,8 @@ export function createHttpAdapter(baseUrl: string): SelfHubApi {
     createSpace: (input) => request("POST", "/api/spaces", input),
     deleteSpace: (spaceId) => request("DELETE", `/api/spaces/${id(spaceId)}`),
     syncSpace: (spaceId) => request("POST", `/api/spaces/${id(spaceId)}/sync`),
+    githubCheck: (spaceId) => request("GET", `/api/spaces/${id(spaceId)}/github`),
+    connectGitHub: (spaceId, input) => request("POST", `/api/spaces/${id(spaceId)}/connect-github`, input),
     tree: (spaceId) => request("GET", `/api/spaces/${id(spaceId)}/tree`),
     file: async (spaceId, path) => file(await request<FileDoc>("GET", `/api/spaces/${id(spaceId)}/file${q({ path })}`)),
     saveFile: async (spaceId, input) => saveResult(await request<SaveFileResult>("PUT", `/api/spaces/${id(spaceId)}/file`, input)),

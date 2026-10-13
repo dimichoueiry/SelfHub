@@ -111,7 +111,7 @@ export function syncInfo(space: Pick<Space, "sync" | "repo">, ago: string): Sync
           : (message ?? "Your changes and changes on GitHub overlap."),
       };
     case "no-remote":
-      return { label: "Not connected to GitHub", tone: "neutral", detail: "Only on this computer. Connect it to GitHub to share it." };
+      return { label: "Not connected to GitHub", tone: "neutral", detail: "Only on this computer. Connect it to GitHub to back it up and share it with your team." };
     case "error":
       return { label: "Sync failed", tone: "danger", detail: message ?? "GitHub didn't respond." };
   }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { PeoplePicker } from "@/components/people/people-picker";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ArrowLeft, Check, CheckCircle2, FolderPlus, GitBranch, Loader2, Lock } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, CloudOff, FolderPlus, GitBranch, Laptop, Loader2, Lock } from "lucide-react";
 import { useAppState } from "@/components/app-state";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -20,8 +20,9 @@ import { kindBlurb, kindLabel, kindOrder } from "@/lib/labels";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { KindGlyph } from "./kind-glyph";
+import { ConnectGitHubFlow } from "./connect-github";
 
-type Step = "choose" | "connect" | "create" | "working" | "done";
+type Step = "choose" | "connect" | "create" | "working" | "done" | "github";
 type Path = "connect" | "create";
 
 const REPO_RE = /^(?:https?:\/\/)?(?:www\.)?(?:github\.com\/)?[\w.-]+\/[\w.-]+?(?:\.git)?\/?$|^git@github\.com:[\w.-]+\/[\w.-]+?(?:\.git)?$/;
@@ -72,7 +73,8 @@ function ServerError({ error, onMakeSpace }: { error: unknown; onMakeSpace?: () 
   );
 }
 
-const createSteps = ["Creating it on GitHub", "Adding a brief, rules and settings", "Giving you and the approvers access"];
+// Creating a space makes a folder on this computer. Putting it on GitHub is a separate, optional step.
+const createSteps = ["Creating the folder on this computer", "Adding a brief, rules and settings", "Recording who approves changes"];
 const connectSteps = ["Checking you can open it", "Reading its files", "Adding it to your spaces"];
 
 export function AddSpaceDialog() {
@@ -100,6 +102,7 @@ export function AddSpaceDialog() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [review, setReview] = useState(false);
   const [reviewTouched, setReviewTouched] = useState(false);
+  const [githubBusy, setGithubBusy] = useState(false);
 
   const repos = useConnectableRepos(addSpaceOpen && step === "connect");
 
@@ -184,7 +187,7 @@ export function AddSpaceDialog() {
 
   const close = (open: boolean) => {
     if (open) return setAddSpaceOpen(true);
-    if (step === "working") return;
+    if (step === "working" || githubBusy) return;
     setAddSpaceOpen(false);
     setTimeout(reset, 200);
   };
@@ -199,22 +202,24 @@ export function AddSpaceDialog() {
           ? "Create a new space."
           : step === "working"
             ? `${steps[progress]}…`
-            : created
-              ? `${created.name} is ready.`
-              : "";
+            : step === "github"
+              ? ""
+              : created
+                ? `${created.name} is ready.`
+                : "";
 
   return (
     <Dialog open={addSpaceOpen} onOpenChange={close}>
       <DialogContent
         className="max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto p-0 sm:max-w-[560px]"
-        showCloseButton={step !== "working"}
-        onInteractOutside={(e) => step === "working" && e.preventDefault()}
+        showCloseButton={step !== "working" && !githubBusy}
+        onInteractOutside={(e) => (step === "working" || githubBusy) && e.preventDefault()}
         onOpenAutoFocus={(e) => {
           // Start at the step's heading so screen readers announce where they are.
           e.preventDefault();
           headingRef.current?.focus();
         }}
-        onEscapeKeyDown={(e) => step === "working" && e.preventDefault()}
+        onEscapeKeyDown={(e) => (step === "working" || githubBusy) && e.preventDefault()}
       >
         {/* One live region for the whole dialog: step changes and progress are announced here. */}
         <p className="sr-only" aria-live="polite" role="status">
@@ -226,7 +231,7 @@ export function AddSpaceDialog() {
               Add a space
             </DialogTitle>
             <DialogDescription className="mt-1">
-              A space is a shared folder of company knowledge, kept on GitHub, that your team and agents work from.
+              A space is a folder of company knowledge that your team and AI agents work from.
             </DialogDescription>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {(
@@ -241,7 +246,7 @@ export function AddSpaceDialog() {
                     id: "create",
                     icon: FolderPlus,
                     title: "Create a new space",
-                    body: "Start from a template. SelfHub creates it on GitHub for you.",
+                    body: "Start from a template. It's saved on this computer first, and you can connect it to GitHub after.",
                   },
                 ] as const
               ).map((o) => (
@@ -496,8 +501,8 @@ export function AddSpaceDialog() {
 
             <div className="flex flex-col gap-3 border-t bg-muted/40 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Lock className="size-3" aria-hidden />
-                {step === "create" ? `Only people in ${me?.org.name ?? "your organization"} can see it.` : "Access stays exactly as it is on GitHub."}
+                {step === "create" ? <Laptop className="size-3" aria-hidden /> : <Lock className="size-3" aria-hidden />}
+                {step === "create" ? "It stays on this computer until you connect it to GitHub." : "Access stays exactly as it is on GitHub."}
               </p>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={() => close(false)}>
@@ -546,10 +551,24 @@ export function AddSpaceDialog() {
             <DialogDescription className="mx-auto mt-1 max-w-sm">
               {path === "create"
                 ? created.repo && created.sync.state !== "no-remote"
-                  ? `SelfHub created ${created.repo.owner}/${created.repo.name} with starter files. Everyone you add can open it.`
-                  : "Created on this computer with starter files. Connect it to GitHub to share it."
+                  ? `${created.name} is on GitHub as ${created.repo.owner}/${created.repo.name}, with starter files. Everyone you add can open it.`
+                  : "Created on this computer with starter files."
                 : `${created.repo ? `${created.repo.owner}/${created.repo.name}` : created.name} is connected. ${created.fileCount} file${created.fileCount === 1 ? " is" : "s are"} ready to read.`}
             </DialogDescription>
+            {created.sync.state === "no-remote" && created.myAccess === "admin" && (
+              <div className="mx-auto mt-5 max-w-sm rounded-lg border bg-muted/40 p-3 text-left">
+                <p className="flex items-center gap-1.5 text-sm font-medium">
+                  <CloudOff className="size-4 text-muted-foreground" aria-hidden />
+                  Only on this computer
+                </p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Connect it to GitHub to back it up and share it with your team. GitHub is a free service that stores your files online.
+                </p>
+                <Button variant="outline" size="sm" className="mt-2.5" onClick={() => setStep("github")}>
+                  Also connect to GitHub now
+                </Button>
+              </div>
+            )}
             <div className="mt-6 flex flex-col-reverse justify-center gap-2 sm:flex-row">
               <Button variant="outline" onClick={reset}>
                 Add another
@@ -564,6 +583,16 @@ export function AddSpaceDialog() {
               </Button>
             </div>
           </div>
+        )}
+
+        {step === "github" && created && (
+          <ConnectGitHubFlow
+            space={created}
+            onBusyChange={setGithubBusy}
+            onConnected={(r) => setCreated(r.space)}
+            onDone={() => setStep("done")}
+            onCancel={() => setStep("done")}
+          />
         )}
       </DialogContent>
     </Dialog>
