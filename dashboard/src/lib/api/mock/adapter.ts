@@ -162,7 +162,10 @@ function buildState(): State {
 
 const ONLY_HERE = "This space is only on this computer. It isn't connected to GitHub.";
 
-/** Sample mode stand-in for gh: set localStorage "selfhub.mock.gh" to "gh-missing" or "logged-out". */
+/**
+ * Sample mode stand-in for gh: set localStorage "selfhub.mock.gh" to "gh-missing" or
+ * "logged-out". "check-fails" makes the check itself fail, like an API without it.
+ */
 function mockGhProblem(): "gh-missing" | "logged-out" | null {
   if (typeof window === "undefined") return null;
   const v = window.localStorage.getItem("selfhub.mock.gh");
@@ -178,6 +181,8 @@ export function createMockAdapter(): SelfHubApi {
   const state = buildState();
 
   const me = (): string => getDemoUser();
+  /** Where a sample space's folder would be on this computer. */
+  const folderOf = (id: string) => `/Users/${me()}/SelfHub/spaces/${id}`;
   const person = (login: string) =>
     state.people.find((p) => p.login === login) ?? { login, name: login, avatarUrl: "", title: undefined };
 
@@ -242,6 +247,7 @@ export function createMockAdapter(): SelfHubApi {
       fileCount: Object.keys(filesHere).length,
       memberCount: Object.keys(s.acl).length,
       updatedAt: state.updatedAt[s.id],
+      path: folderOf(s.id),
     };
   }
 
@@ -491,6 +497,7 @@ export function createMockAdapter(): SelfHubApi {
       const s = findSpace(id);
       requireAccess(s, "admin");
       if (s.repo) throw new ApiError(409, "already-connected", `${s.name} is already connected to GitHub.`, "Use Sync now to send your latest changes.");
+      if (typeof window !== "undefined" && window.localStorage.getItem("selfhub.mock.gh") === "check-fails") throw new ApiError(404, "not-found", "Not Found");
       const problem = mockGhProblem();
       return {
         ready: !problem,
@@ -499,7 +506,7 @@ export function createMockAdapter(): SelfHubApi {
         owners: problem ? [] : [{ login: me(), kind: "user" as const }, { login: "northline", kind: "org" as const }],
         defaultOwner: problem ? null : "northline",
         suggestedName: s.kind === "client" ? `client-${s.id}` : s.id,
-        path: `/Users/${me()}/SelfHub/spaces/${s.id}`,
+        path: folderOf(s.id),
       };
     },
 

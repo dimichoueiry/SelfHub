@@ -123,6 +123,8 @@ def test_gh_not_installed_explains_and_gives_the_folder_path(
     assert check["ready"] is False and check["problem"] == "gh-missing"
     assert check["path"] == str(folder.resolve()) and Path(check["path"]).is_absolute()
     assert check["suggestedName"] == "ridgeline-plumbing" and check["owners"] == []
+    # The space itself carries the path too, so the prompt works even if the check fails.
+    assert client.get("/api/spaces/ridgeline-plumbing").json()["path"] == check["path"]
 
     res = _connect(client)
     assert res.status_code == 503

@@ -53,6 +53,8 @@ export interface Space {
   fileCount: number;
   memberCount: number;
   updatedAt: string;
+  /** Absolute path of the space's folder on this computer. Older APIs don't send it. */
+  path?: string | null;
 }
 
 export type CreateSpaceInput =

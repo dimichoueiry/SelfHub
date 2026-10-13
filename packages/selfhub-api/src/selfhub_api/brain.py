@@ -258,6 +258,8 @@ class Brain:
             "fileCount": files,
             "memberCount": len(self._space_members(space)),
             "updatedAt": _utc(head.date) if head else None,
+            # The folder on this computer, for the copy-paste prompt for Claude or Codex.
+            "path": str(space.path.resolve()),
         }
 
     def create_space(

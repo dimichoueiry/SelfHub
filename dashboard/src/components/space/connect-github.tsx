@@ -30,17 +30,63 @@ function nameProblem(name: string) {
   return undefined;
 }
 
-/** The prompt someone pastes into Claude or Codex when SelfHub can't do it here. */
-export function connectPrompt(path: string, name: string, visibility: RepoVisibility = "private", org?: string | null) {
-  const folder = /\s/.test(path) ? `"${path}"` : path;
-  return (
-    `Please connect the folder ${folder} to GitHub for me. ` +
-    "If I don't have the GitHub CLI (gh), install it. " +
-    "If I don't have a GitHub account, help me create a free one at github.com/signup. " +
-    "Log me in with `gh auth login` (HTTPS, browser). " +
-    `Then create a ${visibility} repository named ${name}${org ? ` in the ${org} organization` : ""} and push this folder to it. ` +
-    "Explain each step in plain language; I'm not technical."
-  );
+/** Shell-quote a path for the prompt's commands, only when it needs it. */
+function shellPath(path: string) {
+  return /^[\w@%+=:,./~-]+$/.test(path) ? path : `"${path.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+/**
+ * The prompt someone pastes into Claude or Codex when SelfHub can't do it here. Always
+ * complete: without a known folder path, it asks the assistant to find the folder first.
+ */
+export function connectPrompt({
+  path,
+  name,
+  spaceName,
+  spaceId,
+  personal = false,
+  visibility = "private",
+  org,
+}: {
+  path?: string | null;
+  name: string;
+  spaceName: string;
+  spaceId: string;
+  personal?: boolean;
+  visibility?: RepoVisibility;
+  org?: string | null;
+}) {
+  const repo = org ? `${org}/${name}` : name;
+  const where = org ? ` in the ${org} organization on GitHub` : " in my own GitHub account";
+  const folder = path
+    ? [`The folder: ${path}`, `(It's "${spaceName}" in SelfHub.)`]
+    : [
+        `The folder: it's "${spaceName}" in SelfHub, but I don't know exactly where it is on my computer.`,
+        `Before anything else, help me find it. It's usually ${personal ? "~/selfhub" : `~/.selfhub/spaces/${spaceId}`}. Show me the full path you found and check it with me before going on.`,
+      ];
+  const cd = path ? `\`cd ${shellPath(path)}\`` : "use `cd` with the path you found";
+  return [
+    "Hi! Please help me put a folder from my computer on GitHub, so it's backed up online and my team can use it. I'm not technical: explain each step in plain, simple language, run the commands for me where you can, and wait for me whenever I need to do something myself.",
+    "",
+    ...folder,
+    "",
+    "Please go through these steps in order:",
+    "",
+    "1. Check the tools. Run `git --version` and `gh --version` to see whether git and the GitHub CLI (gh) are installed. Install whatever is missing. On a Mac, use Homebrew: `brew install git gh`. If Homebrew isn't installed, either install it from https://brew.sh first, or download the installers from https://git-scm.com and https://cli.github.com. On Windows, use `winget install --id Git.Git` and `winget install --id GitHub.cli`. Tell me what each tool is for in one sentence.",
+    "",
+    "2. Ask me whether I have a GitHub account. If I don't, walk me through creating a free one at https://github.com/signup, one screen at a time, and wait until I've finished (including confirming my email).",
+    "",
+    '3. Log me in to GitHub. Run `gh auth login` and tell me what to pick at each question, and why: "GitHub.com", then "HTTPS", then "Yes" to log in to Git with my GitHub account, then "Login with a web browser". Tell me to copy the one-time code it shows, press Enter, and paste the code in the browser page that opens. Then run `gh auth status` to make sure it worked.',
+    "",
+    "4. Put the folder on GitHub. In the folder above:",
+    `   - Go into it: ${cd}.`,
+    "   - If it isn't a git repository yet (`git status` says so), run `git init`.",
+    '   - If it has no commits yet, save everything in a first commit: `git add -A`, then `git commit -m "First version"`. If git asks who I am, help me set my name and email.',
+    "   - Run `git remote -v`. If the folder already has a remote (for example \"origin\"), stop and ask me before changing it. Never replace an existing remote without my OK.",
+    `   - Create a ${visibility.toUpperCase()} repository named ${name}${where}, set it as the remote, and send the files: \`gh repo create ${repo} --${visibility} --source . --remote origin --push\`. If that name is already taken, suggest a similar free name and ask me first.`,
+    "",
+    "5. Confirm it worked. Run `git status` and `git remote -v`, show me the link to the new repository on GitHub, and tell me in one or two sentences what you did. Then tell me to go back to SelfHub and click \"Check again\".",
+  ].join("\n");
 }
 
 /**
@@ -79,6 +125,9 @@ export function ConnectGitHubFlow({
   const [stillNot, setStillNot] = useState(false);
   const [copied, setCopied] = useState(false);
   const [announce, setAnnounce] = useState("");
+  /** Looking up the folder path for the prompt, when the check never gave us one. */
+  const lookupStarted = useRef(false);
+  const [lookupDone, setLookupDone] = useState(false);
 
   // Each phase starts at its heading, so keyboard and screen reader users know where they are.
   useEffect(() => {
@@ -150,6 +199,22 @@ export function ConnectGitHubFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const knownPath = check?.path || space.path || null;
+
+  // The prompt needs the folder's real path. If we got here without it (the check failed,
+  // or an older API), ask once more; if that fails too, the prompt says how to find it.
+  useEffect(() => {
+    if (phase !== "fallback" || knownPath || lookupStarted.current) return;
+    lookupStarted.current = true;
+    getApi()
+      .githubCheck(space.id)
+      .then(
+        (found) => setCheck((prev) => prev ?? found),
+        () => undefined,
+      )
+      .finally(() => setLookupDone(true));
+  }, [phase, knownPath, space.id]);
+
   async function connect() {
     setSubmitted(true);
     if (nameProblem(name) || !owner) return;
@@ -196,6 +261,16 @@ export function ConnectGitHubFlow({
   }
 
   const org = check?.owners.find((o) => o.login === owner && o.kind === "org")?.login ?? null;
+  const promptLoading = !knownPath && !lookupDone;
+  const prompt = connectPrompt({
+    path: knownPath,
+    name: name.trim() || check?.suggestedName || (space.kind === "personal" ? "my-selfhub" : space.id),
+    spaceName: space.name,
+    spaceId: space.id,
+    personal: space.kind === "personal",
+    visibility,
+    org,
+  });
   const fullName = `${owner}/${name.trim()}`;
   const nameError = submitted ? nameProblem(name) : undefined;
 
@@ -488,19 +563,28 @@ export function ConnectGitHubFlow({
             <div>
               <div className="flex items-end justify-between gap-2">
                 <Label htmlFor="connect-prompt">Prompt for Claude or Codex</Label>
-                <Button type="button" size="sm" variant="outline" onClick={() => copyPrompt(connectPrompt(check?.path ?? "", name.trim() || check?.suggestedName || space.id, visibility, org))} disabled={!check}>
+                <Button type="button" size="sm" variant="outline" onClick={() => copyPrompt(prompt)} disabled={promptLoading}>
                   {copied ? <Check className="text-success-text" aria-hidden /> : <Copy aria-hidden />}
                   {copied ? "Copied" : "Copy prompt"}
                 </Button>
               </div>
-              <Textarea
-                id="connect-prompt"
-                readOnly
-                rows={6}
-                value={check ? connectPrompt(check.path, name.trim() || check.suggestedName, visibility, org) : ""}
-                className="mt-1.5 resize-none font-mono text-xs leading-5"
-                onFocus={(e) => e.currentTarget.select()}
-              />
+              {promptLoading ? (
+                <div
+                  aria-busy="true"
+                  className="mt-1.5 flex h-72 items-center justify-center gap-2 rounded-md border bg-muted/30 text-sm text-muted-foreground"
+                >
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                  Getting your prompt ready…
+                </div>
+              ) : (
+                <Textarea
+                  id="connect-prompt"
+                  readOnly
+                  value={prompt}
+                  className="mt-1.5 h-72 resize-none overflow-y-auto font-mono text-xs leading-5 field-sizing-fixed"
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+              )}
             </div>
           </div>
           <div className="flex flex-col-reverse gap-2 border-t bg-muted/40 px-6 py-3 sm:flex-row sm:items-center sm:justify-between">

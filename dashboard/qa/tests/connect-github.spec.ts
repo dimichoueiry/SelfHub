@@ -70,8 +70,11 @@ test("fallback: not logged in, copy the prompt, check again", async ({ page, con
   await expect(page.getByRole("heading", { name: "You're not logged in to GitHub on this computer" })).toBeVisible();
   await expect(page.getByRole("link", { name: /github.com\/signup/ })).toHaveAttribute("href", "https://github.com/signup");
   const prompt = page.getByLabel("Prompt for Claude or Codex");
-  await expect(prompt).toHaveValue(/^Please connect the folder \/Users\/maya\/SelfHub\/spaces\/ridgeline-plumbing to GitHub for me\./);
-  await expect(prompt).toHaveValue(/create a private repository named client-ridgeline-plumbing and push this folder to it/);
+  await expect(prompt).toHaveValue(/^The folder: \/Users\/maya\/SelfHub\/spaces\/ridgeline-plumbing$/m);
+  await expect(prompt).toHaveValue(/Create a PRIVATE repository named client-ridgeline-plumbing in my own GitHub account/);
+  for (const step of ["`gh --version`", "brew install git gh", "https://github.com/signup", "`gh auth login`", "git init", "--private --source . --remote origin --push", "ask me before changing it", 'click "Check again"'])
+    await expect(prompt).toHaveValue(new RegExp(step.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  await expect(prompt).toHaveJSProperty("readOnly", true);
   await page.getByRole("button", { name: "Copy prompt" }).click();
   await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Copied" })).toHaveCount(1);
@@ -130,4 +133,26 @@ test("members page: admins can connect from the note", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Connect to GitHub" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Connect to GitHub" })).toBeFocused();
+});
+
+test("fallback: the prompt is filled in even when the check itself fails", async ({ page, context }) => {
+  // The bug: an API without the check (404) left the prompt empty and Copy disabled.
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await as(page, "maya");
+  await page.addInitScript(() => window.localStorage.setItem("selfhub.mock.gh", "check-fails"));
+  await page.goto("/spaces/archive/members");
+  await page.getByRole("button", { name: "Connect to GitHub" }).click();
+  await expect(page.getByRole("heading", { name: "Couldn't connect to GitHub" })).toBeVisible();
+  await page.getByRole("button", { name: "Do it with Claude or Codex instead" }).click();
+  await expect(page.getByRole("heading", { name: "Do it with Claude or Codex" })).toBeVisible();
+  const prompt = page.getByLabel("Prompt for Claude or Codex");
+  await expect(prompt).toHaveValue(/^The folder: \/Users\/maya\/SelfHub\/spaces\/archive$/m);
+  await expect(prompt).toHaveValue(/cd \/Users\/maya\/SelfHub\/spaces\/archive/);
+  expect((await prompt.inputValue()).length).toBeGreaterThan(1500);
+  // Tall enough to read a good part of it.
+  expect((await prompt.boundingBox())!.height).toBeGreaterThan(250);
+  await page.getByRole("button", { name: "Copy prompt" }).click();
+  await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("The folder: /Users/maya/SelfHub/spaces/archive");
+  await page.screenshot({ path: shot("13-fallback-check-failed") });
 });
