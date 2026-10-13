@@ -116,14 +116,51 @@ def test_pack_stays_out_of_git_unless_shared(tmp_path: Path) -> None:
     assert "AGENTS.md" in _status(shared) and ".claude/" in _status(shared)
 
 
-def test_tracked_agents_md_is_not_hidden(tmp_path: Path) -> None:
+def test_tracked_agents_md_is_left_alone_unless_shared(tmp_path: Path) -> None:
     root = _space(tmp_path / "apex")
     (root / AGENTS_REL).write_text("# Team notes\n")
     run_git(["add", "AGENTS.md"], cwd=root)
     run_git([*IDENTITY, "commit", "-qm", "Add agent notes"], cwd=root)
-    install_skills(space=root)
+
+    actions = {a.path: a for a in install_skills(space=root)}
+    skipped = actions[root / AGENTS_REL]
+    assert skipped.action == "skipped"
+    assert skipped.note == (
+        "Codex: this space already has its own AGENTS.md, so SelfHub didn't change it. "
+        'To add SelfHub\'s guidance there, run: selfhub skills install --space "Apex Roofing" '
+        "--share"
+    )
+    assert (root / AGENTS_REL).read_text() == "# Team notes\n"
+    assert (root / SKILL_REL).exists()  # Claude still gets the skill
     assert "/AGENTS.md" not in (root / ".git/info/exclude").read_text()
-    assert _status(root).strip() == "M AGENTS.md"
+    assert _status(root) == ""  # no unexplained unsaved change
+
+    install_skills(space=root, share=True)
+    assert (root / AGENTS_REL).read_text().startswith("# Team notes\n\n" + BEGIN)
+
+
+def test_cli_prints_the_tracked_agents_md_line_with_the_space_name(tmp_path: Path) -> None:
+    runner = CliRunner()
+    me = ["--repo-path", str(tmp_path / "me")]
+    assert runner.invoke(app, ["init", *me]).exit_code == 0
+    root = tmp_path / "apex"
+    created = runner.invoke(app, ["space", "create", str(root), "--name", "Apex Roofing",
+                                  "--kind", "client", *me])
+    assert created.exit_code == 0, created.stdout
+    (root / AGENTS_REL).write_text("# Team notes\n")
+    run_git(["add", "AGENTS.md"], cwd=root)
+    run_git([*IDENTITY, "commit", "-qm", "Add agent notes"], cwd=root)
+
+    result = runner.invoke(app, ["skills", "install", "--all", *me])
+    assert result.exit_code == 0, result.stdout
+    assert ("Codex: this space already has its own AGENTS.md, so SelfHub didn't change it. "
+            "To add SelfHub's guidance there, run: "
+            'selfhub skills install --space "Apex Roofing" --share') in result.stdout
+
+    shared = runner.invoke(app, ["skills", "install", "--space", "Apex Roofing", "--share",
+                                 *me])
+    assert shared.exit_code == 0, shared.stdout
+    assert BEGIN in (root / AGENTS_REL).read_text()
 
 
 def test_install_works_without_git(tmp_path: Path) -> None:

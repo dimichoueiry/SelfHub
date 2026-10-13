@@ -35,8 +35,13 @@ selfhub skills show --space ~/spaces/apex [--codex]     # print it without writi
   `SKILL.md` is kept. If the markers are damaged, the install stops and changes nothing.
 - The pack stays on this computer. In a git space it is added to `.git/info/exclude`, so
   it doesn't show up as unsaved changes and isn't sent to the client's repo. Pass
-  `--share` to leave it visible so you can commit it. An `AGENTS.md` that is already
-  committed is never hidden; the SelfHub block shows up as a change to it.
+  `--share` to leave it visible so you can commit it.
+- If a space already has a committed `AGENTS.md`, it is left alone unless you pass
+  `--share`; Claude Code still gets its skill. The install says how to add it.
+- `--space` takes a folder or the name of a connected space.
+- `bash scripts/setup.sh` runs `selfhub skills install --all` after writing settings, and
+  adds `--global` when you say yes (or with `--yes`). If it fails, setup still finishes and
+  prints the command to run again. It never pushes or calls GitHub.
 
 From Python (for the setup script):
 

@@ -908,7 +908,8 @@ OverridesOption = Annotated[
 @skills_app.command("install")
 def skills_install_command(
     space: Annotated[
-        Path | None, typer.Option("--space", help="Space folder to install into")
+        str | None,
+        typer.Option("--space", help="Space folder, or the name of a connected space"),
     ] = None,
     all_spaces: Annotated[
         bool, typer.Option("--all", help="Your personal SelfHub and every connected space")
@@ -925,8 +926,17 @@ def skills_install_command(
     repo_path: RepoOption = None,
     as_json: JsonOption = False,
 ) -> None:
-    targets: list[Path] = [space.expanduser()] if space else []
+    targets: list[Path] = []
     problems: list[str] = []
+    if space:
+        folder = Path(space).expanduser()
+        if not folder.is_dir():
+            try:
+                folder = _workspace(repo_path).find(space).path
+            except SpaceError as exc:
+                _emit(CommandResult(False, f"{space} is not a folder. {exc}").to_dict(), as_json)
+                raise typer.Exit(1) from exc
+        targets.append(folder)
     if all_spaces:
         spaces, problems = _workspace(repo_path).spaces()
         targets += [s.path for s in spaces if s.path.is_dir()]
@@ -946,8 +956,8 @@ def skills_install_command(
         _emit(CommandResult(False, str(exc)).to_dict(), as_json)
         raise typer.Exit(1) from exc
     verb = "would " if dry_run else ""
-    lines = [f"{verb}{a.action:<9} {a.path}" for a in actions]
-    lines += [f"skipped   {p}" for p in problems]
+    lines = [a.note if a.note else f"{verb}{a.action:<9} {a.path}" for a in actions]
+    lines += [f"problem   {p}" for p in problems]
     payload = CommandResult(True, "\n".join(lines) or "Nothing to do.",
                             {"actions": [a.to_dict() for a in actions], "dry_run": dry_run,
                              "problems": problems})
@@ -1183,12 +1193,14 @@ def _run_subcommand_from_console(args: list[str]) -> int:
     if upfront_hint:
         typer.secho(upfront_hint, fg=typer.colors.YELLOW)
     try:
-        app(
+        # Without standalone mode, click returns a command's `typer.Exit` code instead of
+        # exiting with it; pass it on so scripts can tell a failure from a success.
+        result = app(
             args=normalized,
             prog_name="selfhub",
             standalone_mode=False,
         )
-        return 0
+        return result if isinstance(result, int) else 0
     except click.ClickException as exc:
         exc.show()
         hint = _build_error_hint(exc, normalized)

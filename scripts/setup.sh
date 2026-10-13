@@ -324,6 +324,31 @@ echo "Writing your settings"
   exit 1
 }
 
+# ---------- agent skill for Claude Code and Codex ----------
+# Installs into your SelfHub and every connected space (kept out of git), and with a yes
+# into ~/.claude/skills and ~/.codex/AGENTS.md. Never pushes and never calls GitHub. A
+# failure here doesn't stop setup.
+
+echo
+echo "SelfHub skill for Claude Code and Codex"
+SKILL_ARGS=(--all)
+if [ "$INTERACTIVE" = 0 ] || ask_yes "  Install the SelfHub skill for Claude Code and Codex on this computer? It helps them find and save files in your spaces the right way."; then
+  SKILL_ARGS+=(--global)
+fi
+SKILL_CMD="cd \"$ROOT\" && uv run selfhub skills install ${SKILL_ARGS[*]}"
+if SKILL_OUT="$(cd "$ROOT" && uv run --no-sync selfhub skills install "${SKILL_ARGS[@]}" 2>&1)"; then
+  echo "$SKILL_OUT" | grep -v '^\(unchanged\|create\|update\) ' | grep . | indent
+  if [[ " ${SKILL_ARGS[*]} " == *" --global "* ]]; then
+    ok "SelfHub skill installed in your spaces and for Claude Code and Codex on this computer"
+  else
+    ok "SelfHub skill installed in your spaces"
+  fi
+else
+  echo "$SKILL_OUT" | tail -n 3 | indent
+  note "the SelfHub skill wasn't installed. Setup carries on. To try again, run:"
+  echo "    $SKILL_CMD"
+fi
+
 CONFIG_ENV=""
 [ -n "${SELFHUB_CONFIG_DIR:-}" ] && CONFIG_ENV="SELFHUB_CONFIG_DIR=\"$SELFHUB_CONFIG_DIR\" "
 echo

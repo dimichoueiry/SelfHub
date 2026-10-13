@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from selfhub_cli import onboarding
+from selfhub_cli.skills import BEGIN, GLOBAL_CODEX_REL, SKILL_REL
 
 ROOT = Path(__file__).resolve().parents[2]
 SETUP = ROOT / "scripts" / "setup.sh"
@@ -116,6 +117,9 @@ def _bin_without_gh(
 def _setup_cmd(tmp_path: Path) -> tuple[list[str], dict[str, str]]:
     env = {k: v for k, v in os.environ.items() if k not in {"GH_TOKEN", "GITHUB_TOKEN"}}
     env["GH_CONFIG_DIR"] = str(tmp_path / "gh-config")
+    # Setup installs the agent skill into ~/.claude and ~/.codex: never the real ones.
+    env["HOME"] = str(tmp_path / "home")
+    (tmp_path / "home").mkdir(exist_ok=True)
     cmd = ["bash", str(SETUP), "--skip-install", "--no-dashboard",
            "--config-dir", str(tmp_path / "cfg"), "--personal-path", str(tmp_path / "me"),
            "--space-name", "Apex", "--space-kind", "client",
@@ -162,15 +166,21 @@ def test_setup_finishes_logged_out_when_input_is_closed(tmp_path: Path) -> None:
     _assert_finished_local_only(tmp_path, out)
 
 
-def test_setup_finishes_logged_out_when_user_says_no(tmp_path: Path) -> None:
-    cmd, env = _setup_cmd(tmp_path)
-    env["PATH"] = _bin_without_gh(tmp_path, FAKE_GH_LOGGED_OUT)
+SKILL_QUESTION = (
+    "Install the SelfHub skill for Claude Code and Codex on this computer? It helps them "
+    "find and save files in your spaces the right way. [Y/n]"
+)
+
+
+def _run_in_terminal(cmd: list[str], env: dict[str, str], answers: dict[str, str]
+                     ) -> tuple[int, str, set[str]]:
+    """Run setup in a pseudo-terminal, answering each question once."""
     leader, follower = pty.openpty()
     proc = subprocess.Popen(cmd, stdin=follower, stdout=follower, stderr=follower, env=env,
                             start_new_session=True)
     os.close(follower)
     out = b""
-    answered = False
+    answered: set[str] = set()
     while True:
         ready, _, _ = select.select([leader], [], [], 60)
         assert ready, out.decode()
@@ -181,14 +191,27 @@ def test_setup_finishes_logged_out_when_user_says_no(tmp_path: Path) -> None:
         if not chunk:
             break
         out += chunk
-        if not answered and b"Log in to GitHub now? [Y/n]" in out:
-            os.write(leader, b"n\n")
-            answered = True
+        flat = out.decode(errors="replace").replace("\r", "").replace("\n", " ")
+        for prompt, reply in answers.items():
+            if prompt not in answered and prompt in flat:
+                os.write(leader, reply.encode() + b"\n")
+                answered.add(prompt)
     os.close(leader)
-    text = out.decode().replace("\r", "")
-    assert proc.wait(timeout=60) == 0, text
-    assert answered
+    return proc.wait(timeout=60), out.decode().replace("\r", ""), answered
+
+
+def test_setup_finishes_logged_out_when_user_says_no(tmp_path: Path) -> None:
+    cmd, env = _setup_cmd(tmp_path)
+    env["PATH"] = _bin_without_gh(tmp_path, FAKE_GH_LOGGED_OUT)
+    login = "Log in to GitHub now? [Y/n]"
+    code, text, answered = _run_in_terminal(cmd, env, {login: "n", SKILL_QUESTION: "n"})
+    assert code == 0, text
+    assert answered == {login, SKILL_QUESTION}
     _assert_finished_local_only(tmp_path, text)
+    # No to the skill question: the spaces still get it, this computer's home doesn't.
+    assert "[ok]       SelfHub skill installed in your spaces\n" in text
+    assert (tmp_path / "cfg/spaces/apex" / SKILL_REL).exists()
+    assert not (tmp_path / "home/.claude").exists() and not (tmp_path / "home/.codex").exists()
 
 
 def test_setup_stops_when_a_required_tool_is_missing(tmp_path: Path) -> None:
@@ -234,3 +257,69 @@ def test_dashboard_command_points_at_the_api_port(tmp_path: Path) -> None:
     assert "NEXT_PUBLIC_SELFHUB_API=http" in dashboard
     assert "NEXT_PUBLIC_SELFHUB_API_URL=http://localhost:8799" in dashboard
     assert out.count("GitHub lets you back up your spaces") == 1  # only at the check
+
+
+# ---------- the agent skill step ----------
+
+
+def test_setup_installs_the_skill_everywhere_with_yes(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    codex = home / GLOBAL_CODEX_REL
+    codex.parent.mkdir()
+    codex.write_text("# My Codex notes\n\nUse tabs.\n")
+    path = _bin_without_gh(tmp_path)
+    result = _run_setup(tmp_path, path)
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    assert "SelfHub skill for Claude Code and Codex" in out
+    assert ("[ok]       SelfHub skill installed in your spaces and for Claude Code and Codex "
+            "on this computer") in out
+    assert out.index("SelfHub skill installed") < out.index("SelfHub is set up.")
+    space = tmp_path / "cfg/spaces/apex"
+    for root in (space, tmp_path / "me"):
+        assert (root / SKILL_REL).exists() and (root / "AGENTS.md").exists()
+    assert (home / SKILL_REL).exists()
+    text = codex.read_text()
+    assert text.startswith("# My Codex notes\n\nUse tabs.\n\n" + BEGIN)  # user text kept
+    status = subprocess.run(["git", "-C", str(space), "status", "--porcelain"],
+                            capture_output=True, text=True, check=True).stdout
+    assert status == ""  # the pack stays out of git
+
+    again = _run_setup(tmp_path, path)
+    assert again.returncode == 0
+    assert codex.read_text() == text
+
+
+def test_setup_finishes_when_the_skill_step_fails(tmp_path: Path) -> None:
+    codex = tmp_path / "home" / GLOBAL_CODEX_REL
+    codex.parent.mkdir(parents=True)
+    damaged = f"{BEGIN}\nhalf a block\n"
+    codex.write_text(damaged)
+    result = _run_setup(tmp_path, _bin_without_gh(tmp_path))
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    assert "[note]     the SelfHub skill wasn't installed. Setup carries on." in out
+    assert f'cd "{ROOT}" && uv run selfhub skills install --all --global' in out
+    assert "SelfHub is set up." in out
+    assert codex.read_text() == damaged  # never overwritten
+
+
+def test_setup_with_a_local_only_space_never_pushes(tmp_path: Path) -> None:
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    space = tmp_path / "cfg/spaces/apex"
+    space.parent.mkdir(parents=True)
+    subprocess.run(["git", "clone", "-q", str(remote), str(space)], check=True,
+                   capture_output=True)
+    gh_log = tmp_path / "gh-calls"
+    fake_gh = FAKE_GH_LOGGED_OUT.replace("#!/bin/sh\n", f'#!/bin/sh\necho "$@" >> {gh_log}\n')
+    result = _run_setup(tmp_path, _bin_without_gh(tmp_path, fake_gh))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (space / SKILL_REL).exists()
+    pushed = subprocess.run(["git", "-C", str(remote), "rev-parse", "--verify", "-q", "HEAD"],
+                            capture_output=True, text=True)
+    assert pushed.returncode != 0  # nothing reached the remote
+    # gh is only asked for its version and login status by the checks, never by the skill.
+    calls = gh_log.read_text().splitlines()
+    assert calls and all(c.split()[0] in {"--version", "auth"} for c in calls), calls

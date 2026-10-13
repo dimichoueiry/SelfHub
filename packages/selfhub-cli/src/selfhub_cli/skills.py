@@ -28,6 +28,7 @@ from selfhub_core.rules import read_rules
 from selfhub_core.spaces import (
     CODEOWNERS_PATH,
     MANIFEST_PATH,
+    PERSONAL_SPACE,
     RULES_LEARNED,
     RULES_PROPOSED,
     SpaceError,
@@ -138,10 +139,14 @@ class PackContext:
 @dataclass(slots=True)
 class InstallAction:
     path: Path
-    action: str  # "create" | "update" | "unchanged"
+    action: str  # "create" | "update" | "unchanged" | "skipped"
+    note: str = ""
 
     def to_dict(self) -> dict[str, str]:
-        return {"path": str(self.path), "action": self.action}
+        out = {"path": str(self.path), "action": self.action}
+        if self.note:
+            out["note"] = self.note
+        return out
 
 
 # ---------- overrides ----------
@@ -628,8 +633,16 @@ def install_skills(
         if not space.is_dir():
             raise SkillsError(f"{space} is not a folder.")
         ctx = space_context(space, overrides)
-        actions += _write_pair(space / SKILL_REL, space / AGENTS_REL, ctx, dry_run)
-        if not share and is_git_repo(space):
+        git = is_git_repo(space)
+        actions.append(_write(space / SKILL_REL, render_skill(ctx), skill_front_matter(),
+                              dry_run))
+        if not share and git and is_tracked(space, AGENTS_REL.as_posix()):
+            # Someone committed their own AGENTS.md. Writing into it would show up as an
+            # unexplained unsaved change, so it is only touched with --share.
+            actions.append(InstallAction(space / AGENTS_REL, "skipped", _tracked_note(ctx)))
+        else:
+            actions.append(_write(space / AGENTS_REL, render_agents_section(ctx), "", dry_run))
+        if not share and git:
             actions += _exclude(space, dry_run)
     if global_home is not None:
         ctx = PackContext(overrides=load_overrides(overrides) if overrides else Overrides())
@@ -637,6 +650,15 @@ def install_skills(
             global_home / SKILL_REL, global_home / GLOBAL_CODEX_REL, ctx, dry_run
         )
     return actions
+
+
+def _tracked_note(ctx: PackContext) -> str:
+    name = ctx.name if ctx.kind != "personal" else PERSONAL_SPACE
+    return (
+        "Codex: this space already has its own AGENTS.md, so SelfHub didn't change it. "
+        "To add SelfHub's guidance there, run: "
+        f'selfhub skills install --space "{name}" --share'
+    )
 
 
 def _write_pair(skill: Path, agents: Path, ctx: PackContext, dry_run: bool
@@ -650,7 +672,10 @@ def _write_pair(skill: Path, agents: Path, ctx: PackContext, dry_run: bool
 def _write(path: Path, block: str, header: str, dry_run: bool) -> InstallAction:
     if path.exists():
         current = path.read_text(encoding="utf-8")
-        updated = upsert_block(current, block)
+        try:
+            updated = upsert_block(current, block)
+        except SkillsError as exc:
+            raise SkillsError(f"{path}: {exc}") from exc
         if updated == current:
             return InstallAction(path, "unchanged")
         action = "update"
