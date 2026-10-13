@@ -1,5 +1,7 @@
 import json
 import os
+import pty
+import select
 import shutil
 import subprocess
 from pathlib import Path
@@ -88,14 +90,22 @@ def test_onboarding_keeps_an_existing_personal_repo_untouched(cfg: Path, tmp_pat
 # ---------- scripts/setup.sh prerequisite checks ----------
 
 
-def _bin_without_gh(tmp_path: Path, gh_script: str | None = None) -> str:
-    """A PATH with the real tools setup.sh needs, minus gh (or with a fake gh)."""
+FAKE_GH_LOGGED_OUT = (
+    '#!/bin/sh\ncase "$1" in\n  --version) echo "gh version 2.65.0 (fake)";;\n'
+    '  *) echo "You are not logged into any GitHub hosts." >&2; exit 1;;\nesac\n'
+)
+
+
+def _bin_without_gh(
+    tmp_path: Path, gh_script: str | None = None, tools: tuple[str, ...] = ("git", "uv")
+) -> str:
+    """A PATH with only the given real tools, and no gh (or a fake gh)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for tool in ("git", "uv", "node", "pnpm", "corepack"):
+    for tool in tools:
         found = shutil.which(tool)
-        if found:
-            (bin_dir / tool).symlink_to(found)
+        assert found, f"{tool} is needed to run this test"
+        (bin_dir / tool).symlink_to(found)
     if gh_script is not None:
         gh = bin_dir / "gh"
         gh.write_text(gh_script)
@@ -103,37 +113,105 @@ def _bin_without_gh(tmp_path: Path, gh_script: str | None = None) -> str:
     return f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
-def _run_setup(tmp_path: Path, path: str) -> subprocess.CompletedProcess[str]:
+def _setup_cmd(tmp_path: Path) -> tuple[list[str], dict[str, str]]:
     env = {k: v for k, v in os.environ.items() if k not in {"GH_TOKEN", "GITHUB_TOKEN"}}
-    env.update(PATH=path, GH_CONFIG_DIR=str(tmp_path / "gh-config"))
-    return subprocess.run(
-        ["bash", str(SETUP), "--yes", "--skip-install", "--no-dashboard",
-         "--config-dir", str(tmp_path / "cfg"), "--personal-path", str(tmp_path / "me")],
-        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=120,
-    )
+    env["GH_CONFIG_DIR"] = str(tmp_path / "gh-config")
+    cmd = ["bash", str(SETUP), "--skip-install", "--no-dashboard",
+           "--config-dir", str(tmp_path / "cfg"), "--personal-path", str(tmp_path / "me"),
+           "--space-name", "Apex", "--space-kind", "client",
+           "--space-path", str(tmp_path / "cfg/spaces/apex")]
+    return cmd, env
 
 
-def test_setup_script_guides_a_user_without_gh(tmp_path: Path) -> None:
-    result = _run_setup(tmp_path, _bin_without_gh(tmp_path))
-    out = result.stdout
-    assert result.returncode == 1, out
-    assert "[missing]  GitHub CLI (gh) is not installed" in out
-    assert "https://github.com/signup" in out
+def _run_setup(tmp_path: Path, path: str) -> subprocess.CompletedProcess[str]:
+    cmd, env = _setup_cmd(tmp_path)
+    env["PATH"] = path
+    return subprocess.run(cmd + ["--yes"], capture_output=True, text=True, env=env,
+                          stdin=subprocess.DEVNULL, timeout=120)
+
+
+def _assert_finished_local_only(tmp_path: Path, out: str) -> None:
+    assert "SelfHub is set up." in out
+    assert "your spaces are only on this computer for now" in out
+    assert "Optional: connect GitHub later" in out
+    assert "It's free." in out and "https://github.com/signup" in out
+    assert "What it's for: backing up your spaces and sharing them with your team." in out
     assert "copy from here" in out and "copy to here" in out
     assert f'bash "{SETUP}"' in out
-    assert "gh auth login --hostname github.com --git-protocol https --web" in out
+    assert "Space 'Apex': Only on this computer" in out
+    assert "needs a GitHub account" not in out
+    assert (tmp_path / "cfg/spaces/apex/.selfhub/space.json").exists()
+
+
+def test_setup_finishes_without_gh(tmp_path: Path) -> None:
+    result = _run_setup(tmp_path, _bin_without_gh(tmp_path))
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    assert "[skipped]  GitHub CLI (gh) is not installed" in out
+    assert "Install it: " in out
+    _assert_finished_local_only(tmp_path, out)
+
+
+def test_setup_finishes_logged_out_when_input_is_closed(tmp_path: Path) -> None:
+    result = _run_setup(tmp_path, _bin_without_gh(tmp_path, FAKE_GH_LOGGED_OUT))
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    assert "[ok]       GitHub CLI (gh) 2.65.0" in out
+    assert "[skipped]  Not logged in to GitHub" in out
+    assert "Install whatever is missing" not in out  # only the login is missing
+    _assert_finished_local_only(tmp_path, out)
+
+
+def test_setup_finishes_logged_out_when_user_says_no(tmp_path: Path) -> None:
+    cmd, env = _setup_cmd(tmp_path)
+    env["PATH"] = _bin_without_gh(tmp_path, FAKE_GH_LOGGED_OUT)
+    leader, follower = pty.openpty()
+    proc = subprocess.Popen(cmd, stdin=follower, stdout=follower, stderr=follower, env=env,
+                            start_new_session=True)
+    os.close(follower)
+    out = b""
+    answered = False
+    while True:
+        ready, _, _ = select.select([leader], [], [], 60)
+        assert ready, out.decode()
+        try:
+            chunk = os.read(leader, 4096)
+        except OSError:  # the script finished and closed the terminal
+            break
+        if not chunk:
+            break
+        out += chunk
+        if not answered and b"Log in to GitHub now? [Y/n]" in out:
+            os.write(leader, b"n\n")
+            answered = True
+    os.close(leader)
+    text = out.decode().replace("\r", "")
+    assert proc.wait(timeout=60) == 0, text
+    assert answered
+    _assert_finished_local_only(tmp_path, text)
+
+
+def test_setup_stops_when_a_required_tool_is_missing(tmp_path: Path) -> None:
+    result = _run_setup(tmp_path, _bin_without_gh(tmp_path, tools=("git",)))  # no uv
+    out = result.stdout
+    assert result.returncode == 1, out
+    assert "[missing]  uv is not installed" in out
+    assert "Setup can't continue yet." in out
+    assert "Optional, while you're at it: connect GitHub." in out
+    assert "copy from here" in out
     assert not (tmp_path / "cfg").exists()  # nothing written before the checks pass
 
 
-def test_setup_script_guides_a_logged_out_user(tmp_path: Path) -> None:
-    fake_gh = '#!/bin/sh\ncase "$1" in\n  --version) echo "gh version 2.65.0 (fake)";;\n' \
-              '  *) echo "You are not logged into any GitHub hosts." >&2; exit 1;;\nesac\n'
-    result = _run_setup(tmp_path, _bin_without_gh(tmp_path, fake_gh))
-    out = result.stdout
-    assert result.returncode == 1, out
-    assert "[ok]       GitHub CLI (gh) 2.65.0" in out
-    assert "[missing]  Not logged in to GitHub" in out
-    assert "https://github.com/signup" in out
-    assert "- Not logged in to GitHub with the GitHub CLI (gh)" in out
-    assert "Install whatever is missing" not in out  # only the login is missing
-    assert f'bash "{SETUP}"' in out
+def test_local_only_space_is_never_pushed(cfg: Path, tmp_path: Path) -> None:
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    space = tmp_path / "apex"
+    subprocess.run(["git", "clone", "-q", str(remote), str(space)], check=True,
+                   capture_output=True)
+    assert onboarding.main(["--yes", "--local-only", "--personal-path", str(tmp_path / "me"),
+                            "--space-name", "Apex", "--space-kind", "client",
+                            "--space-path", str(space)]) == 0
+    assert (space / ".selfhub/space.json").exists()
+    pushed = subprocess.run(["git", "-C", str(remote), "rev-parse", "--verify", "-q", "HEAD"],
+                            capture_output=True, text=True)
+    assert pushed.returncode != 0  # nothing reached the remote

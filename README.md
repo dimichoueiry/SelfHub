@@ -27,9 +27,10 @@ If SelfHub is installed and available on `PATH`, these agents can call `selfhub`
 
 ## Install And Run
 
-Quick start: one command. It checks git, the GitHub CLI (gh), your GitHub login, uv,
-Python and Node.js, tells you how to get anything missing (or gives you a prompt to paste into
-Claude Code or Codex), installs SelfHub and writes all its settings. You never create a config
+Quick start: one command. It checks git, uv, Python and Node.js, tells you how to get
+anything missing (or gives you a prompt to paste into Claude Code or Codex), installs SelfHub
+and writes all its settings. GitHub (the GitHub CLI and a free account) is optional: without
+it, your spaces stay only on this computer until you connect GitHub. You never create a config
 file by hand. See [SETUP.md](SETUP.md).
 
 ```bash

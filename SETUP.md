@@ -15,22 +15,26 @@ page, click **Code → Download ZIP**, unzip it, and run the script from that fo
 
 The script does every step. You never create a config file by hand.
 
-1. **Checks what SelfHub needs**, one line each, `[ok]` or `[missing]`:
-   - git
-   - GitHub CLI (gh): GitHub's own command-line app
-   - that you're logged in to GitHub (`gh auth status`)
-   - uv (installs the Python code), and Python 3.12 or newer (uv downloads it if missing)
-   - Node.js 20.9 or newer and pnpm, for the dashboard (skip both with `--no-dashboard`)
-2. **If something is missing**, it says how to install it on your system (macOS, Linux or
-   Windows) and stops. It also prints a ready-to-paste prompt for Claude Code or Codex: the
-   AI installs what's missing, helps you make a GitHub account, logs you in and runs setup again.
-3. **No GitHub account?** Each space is stored as a GitHub repo, so you need one. It's free:
-   <https://github.com/signup>. When you're not logged in, the script offers to run
-   `gh auth login` for you (HTTPS, browser login) and checks again afterwards.
+1. **Checks what SelfHub needs**, one line each:
+   - Required: git; uv (installs the Python code) and Python 3.12 or newer (uv downloads it
+     if missing); Node.js 20.9 or newer and pnpm, for the dashboard (skip both with
+     `--no-dashboard`).
+   - Recommended: the GitHub CLI (gh), GitHub's own command-line app, and being logged in to
+     GitHub (`gh auth status`).
+2. **If a required tool is missing**, it says how to install it on your system (macOS, Linux
+   or Windows) and stops. It also prints a ready-to-paste prompt for Claude Code or Codex: the
+   AI installs what's missing and runs setup again.
+3. **GitHub is optional.** GitHub lets you back up your spaces and share them with your team.
+   It's free (<https://github.com/signup>). If you're not logged in, the script offers to run
+   `gh auth login` for you (HTTPS, browser login) and checks again. Say no, or don't have
+   gh yet, and setup still finishes: your spaces stay **Only on this computer** and nothing
+   is pushed. At the end, under "Optional: connect GitHub later", it shows the steps and a
+   Claude Code / Codex prompt for doing it later. You can also connect a space from the
+   dashboard.
 4. **Installs SelfHub** (`uv sync --all-packages`, then `pnpm install` in `dashboard/`).
 5. **Writes your settings**, and only what's missing:
    - your own SelfHub folder (default `~/selfhub`), set up as a git repo
-   - `~/.selfhub/config.json`: where that folder is, and your GitHub username
+   - `~/.selfhub/config.json`: where that folder is, and your GitHub username (if logged in)
    - optionally a shared space (team, client or org): its folder, its `.selfhub/space.json`
      and starter files, and its entry in `~/.selfhub/spaces.json`
 
@@ -67,7 +71,7 @@ bash scripts/setup.sh --yes --space-name "Apex Roofing" --space-kind client
 | Node.js | 20.9 or newer (Next.js 16 needs it) | dashboard |
 | pnpm | 9.14.4 (`packageManager` in `dashboard/package.json`); corepack also works | dashboard |
 | Git | any recent | every space is a git repo |
-| [GitHub CLI](https://cli.github.com) (`gh`) | any recent | roles, members and pull requests |
+| [GitHub CLI](https://cli.github.com) (`gh`) | any recent, optional | backup and sharing: sync, roles, members and pull requests |
 
 **GitHub access.** With real data, the API talks to GitHub only through `gh api ...`
 (`packages/selfhub-api/src/selfhub_api/github.py`). It never reads a token itself.

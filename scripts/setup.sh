@@ -4,9 +4,10 @@
 #   bash scripts/setup.sh            # asks a few questions, with defaults
 #   bash scripts/setup.sh --yes      # asks nothing; uses flags, env vars and defaults
 #
-# 1. Checks the tools SelfHub needs (git, GitHub CLI, GitHub login, uv, Python, Node, pnpm)
-#    and says exactly how to get anything that's missing, plus a prompt to paste into
-#    Claude Code or Codex that does it for you.
+# 1. Checks the tools SelfHub needs (git, uv, Python, Node, pnpm) and says exactly how to
+#    get anything that's missing, plus a prompt to paste into Claude Code or Codex that does
+#    it for you. GitHub (gh + login) is recommended, not required: without it, spaces stay
+#    "Only on this computer" and setup still finishes.
 # 2. Installs SelfHub's code (uv sync, pnpm install).
 # 3. Writes every config file (selfhub_cli/onboarding.py). Safe to run again: it never
 #    replaces an existing config without asking.
@@ -78,6 +79,7 @@ esac
 ok()   { printf '  [ok]       %s\n' "$1"; }
 bad()  { printf '  [missing]  %s\n' "$1"; }
 note() { printf '  [note]     %s\n' "$1"; }
+later(){ printf '  [skipped]  %s\n' "$1"; }
 
 # version_at_least 20.9.0 22.11.0 -> true
 version_at_least() {
@@ -93,8 +95,6 @@ ask_yes() {  # ask_yes "Question" -> default yes
 
 MISSING=()   # short descriptions, used in the AI prompt
 FIXES=()     # what to do, one block per missing thing
-NEED_LOGIN=0
-NEED_INSTALL=0
 
 install_step() {  # install_step <tool>: the exact command for this OS
   case "$1:$OS" in
@@ -118,14 +118,18 @@ install_step() {  # install_step <tool>: the exact command for this OS
   esac
 }
 
-missing() {  # missing <tool> <line> <what it is>
+missing() {  # missing <tool> <line> <what it is>: a required tool
   bad "$2"
-  NEED_INSTALL=1
   MISSING+=("$2")
   FIXES+=("$2
     What it is: $3
     Install it: $(install_step "$1")")
 }
+
+GH_WHY="GitHub lets you back up your spaces and share them with your team. It's free.
+You can skip this now: your spaces will stay only on this computer, and you can connect
+GitHub later from the dashboard."
+indent() { sed 's/^/    /'; }
 
 echo
 echo "SelfHub setup"
@@ -141,56 +145,45 @@ else
   missing git "git is not installed" "the tool that keeps the history of every space."
 fi
 
-# b. GitHub CLI
+# b. GitHub CLI and c. GitHub login: recommended, not required. Without them, spaces stay
+# "Only on this computer" until the user connects GitHub.
+logged_in() { gh auth status --hostname github.com >/dev/null 2>&1; }
 HAVE_GH=0
+GITHUB=0
 if command -v gh >/dev/null 2>&1; then
   HAVE_GH=1
   ok "GitHub CLI (gh) $(gh --version | head -n1 | awk '{print $3}')"
-else
-  missing gh "GitHub CLI (gh) is not installed" \
-    "GitHub's own command-line app. SelfHub uses it to see who can open each space."
-fi
-
-# c. logged in to GitHub
-logged_in() { gh auth status --hostname github.com >/dev/null 2>&1; }
-if [ "$HAVE_GH" = 0 ]; then
-  bad "GitHub login: can't check until the GitHub CLI (gh) is installed"
-  NEED_LOGIN=1
-  MISSING+=("GitHub login not checked yet (it needs the GitHub CLI first)")
-  FIXES+=("GitHub login
-    What it is: each space is stored as a GitHub repo, so SelfHub needs a GitHub account.
-    No account yet? Make a free one: https://github.com/signup
-    Once the GitHub CLI (gh) is installed, log in: gh auth login --hostname github.com --git-protocol https --web")
-elif logged_in; then
-  ok "logged in to GitHub as $(gh api user --jq .login 2>/dev/null || echo 'your account')"
-else
-  bad "Not logged in to GitHub"
-  echo
-  echo "    Each space is stored as a GitHub repo, so SelfHub needs a GitHub account."
-  echo "    It's free. No account yet? Make one first: https://github.com/signup"
-  echo "    Then log in here. Your browser opens, you type a short code, and you're done."
-  echo
-  if ask_yes "    Log in to GitHub now?"; then
-    gh auth login --hostname github.com --git-protocol https --web
-    echo
-  fi
   if logged_in; then
-    ok "logged in to GitHub as $(gh api user --jq .login 2>/dev/null || echo 'your account')"
+    GITHUB=1
   else
-    NEED_LOGIN=1
-    MISSING+=("Not logged in to GitHub with the GitHub CLI (gh)")
-    FIXES+=("Not logged in to GitHub
-    What it is: SelfHub reads your spaces and who can open them through your GitHub account.
-    No account yet? Make a free one: https://github.com/signup
-    Log in: gh auth login --hostname github.com --git-protocol https --web")
+    later "Not logged in to GitHub"
+    echo
+    echo "$GH_WHY" | indent
+    echo "    No account yet? Make one first: https://github.com/signup"
+    echo "    To log in, your browser opens and you type a short code."
+    echo
+    if ask_yes "    Log in to GitHub now?"; then
+      gh auth login --hostname github.com --git-protocol https --web
+      echo
+      logged_in && GITHUB=1
+    fi
   fi
+  [ "$GITHUB" = 1 ] && ok "logged in to GitHub as $(gh api user --jq .login 2>/dev/null || echo 'your account')"
+else
+  later "GitHub CLI (gh) is not installed, so GitHub isn't connected"
+  echo
+  echo "$GH_WHY" | indent
+  echo "    How to install it and log in is at the end."
+  echo
 fi
-if [ "$HAVE_GH" = 1 ] && [ "$NEED_LOGIN" = 0 ]; then
+if [ "$GITHUB" = 1 ]; then
   scopes="$(gh auth status --hostname github.com 2>&1 | grep -i 'token scopes' || true)"
   if [ -n "$scopes" ] && ! { echo "$scopes" | grep -q "'repo'" && echo "$scopes" | grep -q "'read:org'"; }; then
     note "your GitHub login can't read repos or teams yet. Fix: gh auth refresh -h github.com -s repo,read:org"
   fi
   [ -n "$OWNER" ] || OWNER="$(gh api user --jq .login 2>/dev/null || true)"
+else
+  PASS+=("--local-only")
 fi
 
 # d. uv and Python (pyproject.toml: requires-python >= 3.12)
@@ -229,20 +222,23 @@ if [ "$DASHBOARD" = 1 ]; then
   fi
 fi
 
-# ---------- anything missing: say how to fix it, then stop ----------
+# ---------- fix steps and the Claude Code / Codex prompt ----------
 
-if [ ${#MISSING[@]} -gt 0 ]; then
-  echo
-  echo "Setup can't continue yet. Here's how to fix each item."
-  echo "(A terminal command is a line you paste into the Terminal app and run with Enter.)"
-  for fix in "${FIXES[@]}"; do
+github_fixes() {
+  if [ "$HAVE_GH" = 0 ]; then
     echo
-    echo "  - $fix"
-  done
+    echo "  - GitHub CLI (gh) is not installed"
+    echo "    What it's for: backing up your spaces and sharing them with your team."
+    echo "    Install it: $(install_step gh)"
+  fi
   echo
-  echo "Then run setup again:"
-  echo "    $SETUP_CMD"
-  echo
+  echo "  - Not logged in to GitHub"
+  echo "    What it's for: backing up your spaces and sharing them with your team."
+  echo "    No account yet? Make a free one: https://github.com/signup"
+  echo "    Log in: gh auth login --hostname github.com --git-protocol https --web"
+}
+
+ai_prompt() {
   echo "Prefer to have an AI assistant do it? Open Claude Code or Codex, paste everything"
   echo "between the two lines below, and press Enter."
   echo
@@ -252,15 +248,19 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   echo "what it does. If you need my password or a click in my browser, tell me exactly"
   echo "what to do and wait for me."
   echo
-  echo "SelfHub's setup check found these problems:"
-  for m in "${MISSING[@]}"; do echo "- $m"; done
+  echo "SelfHub's setup check found these things to fix:"
+  for m in ${MISSING[@]+"${MISSING[@]}"}; do echo "- $m"; done
+  if [ "$GITHUB" = 0 ]; then
+    [ "$HAVE_GH" = 0 ] && echo "- The GitHub CLI (gh) is not installed"
+    echo "- I'm not logged in to GitHub"
+  fi
   echo
   echo "Please:"
   n=1
-  if [ "$NEED_INSTALL" = 1 ]; then
+  if [ ${#MISSING[@]} -gt 0 ] || [ "$HAVE_GH" = 0 ]; then
     echo "$n. Install whatever is missing above, using the normal installer for $OS_NAME."; n=$((n + 1))
   fi
-  if [ "$NEED_LOGIN" = 1 ]; then
+  if [ "$GITHUB" = 0 ]; then
     echo "$n. Ask me if I have a GitHub account. If I don't, help me make a free one at"
     echo "   https://github.com/signup and wait while I finish it in my browser."; n=$((n + 1))
     echo "$n. Log me in to GitHub with the GitHub CLI (gh) by running:"
@@ -270,10 +270,31 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   echo "$n. Run SelfHub's setup again with this exact command:"
   echo "   $SETUP_CMD"; n=$((n + 1))
   echo "$n. If it reports another problem, fix it the same way and run it again until it"
-  echo "   says \"SelfHub is set up\". Answer its questions with me."
+  echo "   says \"SelfHub is set up\" with nothing left to fix. Answer its questions with me."
   echo "Don't create any GitHub repositories and don't edit files in the SelfHub folder."
   echo "------------------------------- copy to here -------------------------------"
   echo
+}
+
+# A required tool is missing: say how to fix it, then stop.
+if [ ${#MISSING[@]} -gt 0 ]; then
+  echo
+  echo "Setup can't continue yet. Here's how to fix each item."
+  echo "(A terminal command is a line you paste into the Terminal app and run with Enter.)"
+  for fix in "${FIXES[@]}"; do
+    echo
+    echo "  - $fix"
+  done
+  if [ "$GITHUB" = 0 ]; then
+    echo
+    echo "Optional, while you're at it: connect GitHub."
+    github_fixes
+  fi
+  echo
+  echo "Then run setup again:"
+  echo "    $SETUP_CMD"
+  echo
+  ai_prompt
   exit 1
 fi
 
@@ -307,6 +328,9 @@ CONFIG_ENV=""
 [ -n "${SELFHUB_CONFIG_DIR:-}" ] && CONFIG_ENV="SELFHUB_CONFIG_DIR=\"$SELFHUB_CONFIG_DIR\" "
 echo
 echo "SelfHub is set up."
+if [ "$GITHUB" = 0 ]; then
+  echo "GitHub isn't connected, so your spaces are only on this computer for now."
+fi
 echo
 echo "To open the dashboard, run these in two Terminal windows:"
 echo "    cd \"$ROOT\" && ${CONFIG_ENV}SELFHUB_API_PORT=8788 uv run selfhub-api"
@@ -315,3 +339,17 @@ if [ "$DASHBOARD" = 1 ]; then
   echo "Then open http://localhost:3000"
 fi
 echo "Running setup again is safe: it keeps everything that's already set up."
+
+if [ "$GITHUB" = 0 ]; then
+  echo
+  echo "Optional: connect GitHub later"
+  echo
+  echo "$GH_WHY" | indent
+  github_fixes
+  echo
+  echo "Then run setup again, or connect a space from the dashboard:"
+  echo "    $SETUP_CMD"
+  echo
+  ai_prompt
+fi
+exit 0

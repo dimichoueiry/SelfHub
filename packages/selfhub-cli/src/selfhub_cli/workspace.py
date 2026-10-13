@@ -161,6 +161,7 @@ class Workspace:
         owners: list[str] | None = None,
         aliases: list[str] | None = None,
         remote_url: str | None = None,
+        push_to_remote: bool = True,
     ) -> CommandResult:
         if kind not in SHARED_KINDS:
             return _fail(f"kind must be one of {', '.join(SHARED_KINDS)}.")
@@ -190,7 +191,7 @@ class Workspace:
             stage_all(path)
             sha = commit(path, f"[SelfHub] create {kind} space {name}", as_user=True)
             push_note = ""
-            if has_remote(path):
+            if push_to_remote and has_remote(path):
                 try:
                     push(path, set_upstream=not has_upstream(path))
                 except GitCommandError:

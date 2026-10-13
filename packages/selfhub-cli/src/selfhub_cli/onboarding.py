@@ -57,6 +57,7 @@ class Options:
     space_name: str | None
     space_kind: str | None
     space_path: Path | None
+    local_only: bool = False
 
 
 @dataclass(slots=True)
@@ -64,6 +65,7 @@ class Report:
     written: list[str] = field(default_factory=list)
     kept: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
 def _env(name: str) -> str | None:
@@ -92,6 +94,8 @@ def parse_args(argv: list[str]) -> Options:
     parser.add_argument("--space-path", type=Path,
                         help="Folder for the space (SELFHUB_SPACE_PATH, "
                              "default <config dir>/spaces/<name>)")
+    parser.add_argument("--local-only", action="store_true",
+                        help="GitHub isn't connected: keep spaces only on this computer")
     parser.add_argument("--no-space", action="store_true",
                         help="Don't set up a shared space now (SELFHUB_NO_SPACE=1)")
     args = parser.parse_args(argv)
@@ -118,6 +122,7 @@ def parse_args(argv: list[str]) -> Options:
         space_name=name,
         space_kind=kind,
         space_path=space_path.expanduser() if space_path else None,
+        local_only=args.local_only,
     )
 
 
@@ -207,8 +212,8 @@ def setup_space(opts: Options, personal: Path, report: Report) -> None:
         if not opts.interactive:
             return
         _say("")
-        _say("A space is a shared SelfHub workspace, stored as a GitHub repo: for a team,")
-        _say("a client or the whole company. You can add more later from the dashboard.")
+        _say("A space is a shared SelfHub workspace: for a team, a client or the whole company.")
+        _say("Connect it to GitHub to share it. You can add more later from the dashboard.")
         want = _ask_yes(opts, "Set up a shared space now?", default=True)
     if not want:
         return
@@ -257,9 +262,13 @@ def setup_space(opts: Options, personal: Path, report: Report) -> None:
         )
         return
     else:
-        result = workspace.create_space(path, name=name, kind=kind)
+        # Without GitHub, never push: the space stays only on this computer.
+        result = workspace.create_space(path, name=name, kind=kind,
+                                        push_to_remote=not opts.local_only)
         if result.success:
             report.written.append(f"Space settings: {path / MANIFEST_PATH}")
+            if opts.local_only:
+                report.notes.append(f"Space '{name}': Only on this computer (not sent to GitHub)")
     registry_file = config_dir() / "spaces.json"
     if result.success:
         report.written.append(f"Connected space '{name}' ({kind}) in {registry_file}")
@@ -293,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         _say(f"  created  {line}")
     for line in report.kept:
         _say(f"  kept     {line}")
+    for line in report.notes:
+        _say(f"  note     {line}")
     for line in report.problems:
         _say(f"  problem  {line}")
     return 1 if report.problems else 0
