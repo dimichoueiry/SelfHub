@@ -23,7 +23,7 @@ test("(b) Sam opens a Northline locked file and sees why", async ({ page }) => {
   await as(page, "sam");
   await page.goto("/spaces/northline?path=locked/compliance.md");
   await expect(page.getByRole("heading", { name: "Compliance rules" })).toBeVisible();
-  await expect(page.getByRole("note").getByText("Locked. Only Maya Lindqvist can change this file, through review.")).toBeVisible();
+  await expect(page.getByRole("note").getByText("Locked. Only Maya Lindqvist can change this file. Ask them to make the change.")).toBeVisible();
   await expect(page.getByRole("link", { name: /Ask Maya Lindqvist for a change/ })).toBeVisible();
   await expect(page.getByText("Opens a GitHub issue")).toBeVisible();
   await expect(page.getByText("This file is locked")).toBeVisible();

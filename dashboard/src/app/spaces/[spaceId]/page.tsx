@@ -113,7 +113,7 @@ function LockedNote({ space, file, approverNames }: { space: Space; file: FileDo
     : null;
   // Our own sentence, in the same access terms as everywhere else (the API says "read access").
   const sentence = file.locked
-    ? (file.reason ?? "This file is locked.").replace(/pull request/gi, "change").replace(/\bit\b(?=, through)/, "this file")
+    ? (file.reason ?? "This file is locked.")
     : space.writePolicy === "read-only"
       ? `Nobody can save changes to ${space.name} from SelfHub.`
       : `You can view ${space.name}. To edit, ask ${askWho} for Can edit.`;
@@ -137,6 +137,16 @@ function LockedNote({ space, file, approverNames }: { space: Space; file: FileDo
         </a>
       )}
     </div>
+  );
+}
+
+/** For owners of a locked file: a quiet line on how their changes are saved. */
+function OwnerNote({ file }: { file: FileDoc }) {
+  return (
+    <p className="mb-6 flex items-start gap-2 text-xs text-muted-foreground" role="note">
+      <Lock className="mt-px size-3.5 shrink-0" aria-hidden />
+      <span>{file.note}</span>
+    </p>
   );
 }
 
@@ -173,7 +183,8 @@ function FilePane({
   const { guard } = useAppState();
   const proposals = useQuery<Proposal[]>({ queryKey: proposalsKey(space.id), queryFn: () => [], staleTime: Infinity, gcTime: Infinity });
   const proposal = proposals.data?.find((p) => p.path === path);
-  const review = space.writePolicy === "pull-request";
+  // An owner's change to a locked file in a connected space is reviewed too.
+  const review = space.writePolicy === "pull-request" || file.data?.saveMode === "review";
   const existing = entries.filter((e) => e.type === "file").map((e) => e.path);
 
   const toolbar = (
@@ -301,6 +312,7 @@ function FilePane({
         ) : (
           <article className="mx-auto w-full max-w-[calc(68ch+4rem)] px-5 pt-6 pb-24 md:px-8 md:pt-8">
             {!doc.editable && <LockedNote space={space} file={doc} approverNames={approverNames} />}
+            {doc.owned && doc.note && <OwnerNote file={doc} />}
             <div className="mb-6">
               {doc.lastCommit ? (
                 <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">

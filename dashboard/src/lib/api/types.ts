@@ -114,6 +114,8 @@ export interface TreeEntry {
   locked: boolean;
   editable: boolean;
   reason?: string;
+  /** Locked, and you own it, so you can change it. */
+  owned?: boolean;
   size?: number;
   updatedAt?: string;
   updatedBy?: string;
@@ -143,6 +145,13 @@ export interface FileDoc {
   locked: boolean;
   editable: boolean;
   reason?: string;
+  /** Locked, and you own it, so you can change it. */
+  owned?: boolean;
+  /** How your save lands when you own a locked file: straight away (only on this
+   * computer) or as a reviewed change (connected to GitHub). */
+  saveMode?: "direct" | "review";
+  /** A quiet note for owners about how their changes are saved. */
+  note?: string;
   sha: string;
   /** null for a file that was never committed. */
   lastCommit: CommitRef | null;

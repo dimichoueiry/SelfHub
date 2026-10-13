@@ -799,13 +799,17 @@ class SelfHubService:
         """Catch up with the remote before writing, as save and delete do."""
         self._sync_before_write()
 
-    def write_refusal(self, rel_path: str) -> str | None:
-        """Why a write to this path is not allowed here, or None when it is."""
+    def write_refusal(self, rel_path: str, owner: bool = False) -> str | None:
+        """Why a write to this path is not allowed here, or None when it is.
+
+        `owner` is the caller's word that the person writing owns the space's locked
+        paths (the dashboard checks this). Agents and the CLI never pass it.
+        """
         if self.manifest is None:
             return None
         if self.manifest.write_policy == "read-only":
             return f"Space '{self.manifest.name}' is read-only. Nothing was written."
-        if is_locked(self.manifest, rel_path):
+        if is_locked(self.manifest, rel_path) and not owner:
             owners = ", ".join(self.manifest.owners) or "the space owners"
             return (
                 f"/{rel_path.lstrip('/')} is locked in space '{self.manifest.name}'. "
@@ -814,15 +818,20 @@ class SelfHubService:
             )
         return None
 
-    def publish(self, message: str, failed_push_note: str) -> tuple[str, str | None]:
+    def publish(self, message: str, failed_push_note: str,
+                review: bool | None = None) -> tuple[str, str | None]:
         """Commit what is staged and send it where this space's write policy says.
 
         direct: commit on the current branch and push.
         pull-request: commit on a new branch, push it, open a PR when `gh` is available,
         and switch back, so the main branch only changes once a reviewer merges.
+        `review` overrides the policy for this one change: True sends it the
+        pull-request way, False commits it directly (an owner's edit to a locked path).
         """
         shared = self.manifest is not None
-        if not shared or self.manifest is None or self.manifest.write_policy != "pull-request":
+        if review is None:
+            review = self.manifest is not None and self.manifest.write_policy == "pull-request"
+        if not review:
             sha = commit(self.repo_path, message, as_user=shared)
             if has_remote(self.repo_path):
                 try:

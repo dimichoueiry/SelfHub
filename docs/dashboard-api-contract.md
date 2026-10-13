@@ -122,7 +122,7 @@ Everything below is new. Old fields keep their names and types. Section by secti
 Every error has the same shape:
 
 ```json
-{ "error": { "code": "locked", "message": "locked/compliance.md is locked in Northline. Only Maya Chen or Marcus Bell can change it, through a reviewed change. Nothing was saved.", "hint": "Ask Maya Chen or Marcus Bell for a change." } }
+{ "error": { "code": "locked", "message": "locked/compliance.md is locked in Northline. Only Maya Chen or Marcus Bell can change it. Nothing was saved.", "hint": "Ask them to make the change." } }
 ```
 
 `hint` may be `null`. The `message` is written for people, so show it as-is. `details`
@@ -343,7 +343,7 @@ depth-first order, folders first.
 ```json
 [
   { "path": ".selfhub/space.json", "name": "space.json", "type": "file", "locked": true, "editable": false,
-    "reason": "Locked. Only Jordan Reyes or Priya Nair can change it, through a reviewed change.",
+    "reason": "Locked. Only Jordan Reyes or Priya Nair can change this file. Ask them to make the change.",
     "system": true, "size": 268, "updatedAt": "2026-07-09T23:02:57+00:00", "updatedBy": "priya-nair" },
   { "path": "past-ads", "name": "past-ads", "type": "dir", "locked": false, "editable": true,
     "updatedAt": "2026-09-30T23:02:57+00:00", "updatedBy": "sam-okafor" },
@@ -353,7 +353,11 @@ depth-first order, folders first.
 ```
 
 - `reason` is present only when `editable` is false: locked, read-only space, read
-  access only, or no access.
+  access only, or no access. A lock reason never names the person asking.
+- `owned: true` marks a locked path the person asking owns, so it's editable for them.
+  Owners are the space's owners (CODEOWNERS, directly or through a team) and whoever
+  created the space, matched on GitHub login, name or email, ignoring case and `@`. For
+  a space only on this computer, this computer's git name and email count too.
 - A folder's `updatedAt`/`updatedBy` come from its most recently changed file.
 - Uncommitted or untracked files have no `updatedAt`.
 
@@ -365,7 +369,7 @@ depth-first order, folders first.
   "content": "# Advertising compliance\n\n…",
   "locked": true,
   "editable": false,
-  "reason": "Locked. Only Maya Chen or Marcus Bell can change it, through a reviewed change.",
+  "reason": "Locked. Only Maya Chen or Marcus Bell can change this file. Ask them to make the change.",
   "format": "markdown",
   "sha": "f6b089e407afb59efcf2c525acdc48db3b2b62ee",
   "lastCommit": {
@@ -383,6 +387,10 @@ depth-first order, folders first.
   for a file never committed.
 - `binary: true` *(extra)* appears for non-UTF-8 files; `content` is then `""` and the file
   isn't editable.
+- For a locked file you own: `owned: true`, `saveMode` (`"direct"` when the space is only
+  on this computer, `"review"` when it's connected to GitHub) and `note`, a quiet line
+  for the reader, e.g. "You own this file. Changes are saved straight away because this
+  space is only on this computer."
 
 ### `PUT /api/spaces/{id}/file`
 
@@ -396,15 +404,17 @@ someone else's change.
 What happens on save:
 
 1. Access check (`no-access`, `read-only`), then the space's own refusal for locked paths
-   and read-only spaces (`locked`, `read-only`). Locked paths are refused for everyone,
-   admins included. Owners change them through a PR on GitHub.
+   and read-only spaces (`locked`, `read-only`). Locked paths are refused for everyone
+   except the space's owners (see `owned` above), admins included.
 2. Pull first if the space is behind.
 3. `baseSha` is compared with the file now on disk. If it differs: `409 conflict`.
 4. Only this path is staged and committed. Other uncommitted work in the clone is left
    alone.
 5. `direct` spaces commit to the default branch and push. `pull-request` spaces commit on a
    new `selfhub/…` branch, push it, open a PR when `gh` can, and leave the default branch
-   unchanged.
+   unchanged. An owner's change to a locked path ignores the policy: in a space connected
+   to GitHub it always goes the `pull-request` way; in a space only on this computer it
+   is committed straight away.
 
 Response:
 

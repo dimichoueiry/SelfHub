@@ -119,10 +119,16 @@ def write_file(
     message: str,
     base_sha: str | None = None,
     create: bool = False,
+    owner: bool = False,
+    review: bool | None = None,
 ) -> WriteOutcome:
-    """Replace (or create) one whole file and publish it per the space's write policy."""
+    """Replace (or create) one whole file and publish it per the space's write policy.
+
+    `owner` lets an owner of the space's locked paths write them; `review` overrides
+    how the change lands (see `SelfHubService.publish`).
+    """
     rel = safe_rel_path(rel_path)
-    _refuse(service, rel)
+    _refuse(service, rel, owner)
     service.prepare_write()
     target = service.repo_path / rel
     if create and target.exists():
@@ -144,12 +150,13 @@ def write_file(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     verb = "Create" if create else "Edit"
-    return _publish(service, [rel], message.strip() or f"{verb} {rel}")
+    return _publish(service, [rel], message.strip() or f"{verb} {rel}", review)
 
 
-def delete_file(service: SelfHubService, rel_path: str, message: str) -> WriteOutcome:
+def delete_file(service: SelfHubService, rel_path: str, message: str,
+                owner: bool = False, review: bool | None = None) -> WriteOutcome:
     rel = safe_rel_path(rel_path)
-    _refuse(service, rel)
+    _refuse(service, rel, owner)
     service.prepare_write()
     target = service.repo_path / rel
     if not target.is_file():
@@ -158,17 +165,17 @@ def delete_file(service: SelfHubService, rel_path: str, message: str) -> WriteOu
         target.unlink()
         return WriteOutcome("committed", None, None, None, "The file was never committed.")
     remove_path(service.repo_path, rel)
-    return _publish(service, [], message.strip() or f"Delete {rel}")
+    return _publish(service, [], message.strip() or f"Delete {rel}", review)
 
 
 def move_file(service: SelfHubService, from_path: str, to_path: str,
-              message: str) -> WriteOutcome:
+              message: str, owner: bool = False, review: bool | None = None) -> WriteOutcome:
     """Rename or move one file as a single change, published per the write policy."""
     old, new = safe_rel_path(from_path), safe_rel_path(to_path)
     if old == new:
         raise SpaceFileError("no-change", "The new name is the same as the old one.")
-    _refuse(service, old)
-    _refuse(service, new)
+    _refuse(service, old, owner)
+    _refuse(service, new, owner)
     service.prepare_write()
     repo = service.repo_path
     source, target = repo / old, repo / new
@@ -184,7 +191,7 @@ def move_file(service: SelfHubService, from_path: str, to_path: str,
     else:
         source.rename(target)
     # `git mv` already staged the removal of the old path; stage only the new one.
-    return _publish(service, [new], message.strip() or f"Rename {old} to {new}")
+    return _publish(service, [new], message.strip() or f"Rename {old} to {new}", review)
 
 
 def search_spaces(
@@ -199,26 +206,29 @@ def search_spaces(
     return hits[:limit]
 
 
-def _refuse(service: SelfHubService, rel: str) -> None:
-    refusal = service.write_refusal(rel)
+def _refuse(service: SelfHubService, rel: str, owner: bool = False) -> None:
+    refusal = service.write_refusal(rel, owner)
     if refusal is None:
         return
     read_only = service.manifest is not None and service.manifest.write_policy == "read-only"
     raise SpaceFileError("read-only" if read_only else "locked", refusal)
 
 
-def _publish(service: SelfHubService, rel_paths: list[str], message: str) -> WriteOutcome:
+def _publish(service: SelfHubService, rel_paths: list[str], message: str,
+             review: bool | None = None) -> WriteOutcome:
     repo = service.repo_path
     try:
         stage_paths(repo, rel_paths)
         if not has_staged_changes(repo):
             raise SpaceFileError("no-change", "Nothing changed; nothing to save.")
         sha, note = service.publish(
-            message, failed_push_note="Saved locally; the push failed. Sync now to retry."
+            message, failed_push_note="Saved locally; the push failed. Sync now to retry.",
+            review=review,
         )
     except GitCommandError as exc:
         raise SpaceFileError("git", str(exc)) from exc
-    is_pr = service.manifest is not None and service.manifest.write_policy == "pull-request"
+    is_pr = review if review is not None else (
+        service.manifest is not None and service.manifest.write_policy == "pull-request")
     branch = current_branch(repo)
     if is_pr:
         proposed = [b for b in branches_containing(repo, sha) if b.startswith("selfhub/")]

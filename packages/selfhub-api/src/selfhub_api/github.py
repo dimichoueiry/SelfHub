@@ -394,7 +394,8 @@ class GhGitHubProvider:
                 # person on this computer, so they can see their spaces and connect them.
                 return _local_person()
             self._me = Person(raw["login"], raw.get("name") or raw["login"],
-                              raw.get("avatar_url") or f"https://github.com/{raw['login']}.png")
+                              raw.get("avatar_url") or f"https://github.com/{raw['login']}.png",
+                              email=raw.get("email"))
         return self._me
 
     def org(self) -> tuple[str, str | None]:

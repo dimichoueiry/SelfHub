@@ -185,6 +185,7 @@ class Brain:
     _members: dict[str, list[Member]] = field(default_factory=dict)
     _people: list[Person] | None = None
     _titles: dict[str, dict[str, str]] = field(default_factory=dict)
+    _owned: dict[str, bool] = field(default_factory=dict)
 
     # ---------- who ----------
 
@@ -303,7 +304,8 @@ class Brain:
                 commit(path, f"[SelfHub] set write policy to {write_policy}", as_user=True)
             if self.ctx.mode == "demo":
                 self._add_demo_remote(path, sid)
-        self.ctx.store.update_space(sid, description=description, createdAt=now_iso())
+        self.ctx.store.update_space(sid, description=description, createdAt=now_iso(),
+                                    createdBy=me.login, createdByName=me.name)
         if self.ctx.mode == "demo":
             self._register_demo_repo(sid, me.login)
         self.ctx.store.add_event("space", me.login, sid, f"{me.name} created the {kind} space "
@@ -521,12 +523,13 @@ class Brain:
             if role in {"none", "read"}:
                 _, reason, code = self._edit_check(space, changes[0].path, role)
                 raise ApiError(403, code or "forbidden", reason or "You can't save here.")
+            owner = self._owns_locked(space)
             for change in changes:
                 editable, _, code = self._edit_check(space, change.path, role)
-                refusal = service.write_refusal(change.path)
+                refusal = service.write_refusal(change.path, owner=owner)
                 if editable and refusal is None:
                     continue
-                owners = _either(self._names(self._owners(space))) or "the space owners"
+                owners = self._other_owners_text(space)
                 if code == "read-only" or (space.kind != "personal"
                                            and space.manifest.write_policy == "read-only"):
                     raise ApiError(403, "read-only", f"{label} is set to view-only, so "
@@ -534,12 +537,12 @@ class Brain:
                 raise ApiError(
                     403, "locked",
                     f"{change.path} is locked in {label}, so these changes can't be saved. "
-                    f"Only {owners} can change it, through a reviewed change. Nothing was "
-                    "saved.",
+                    f"Only {owners} can change it. Nothing was saved.",
                     f"Undo your edit to {change.path} on this computer, then save the rest. "
                     f"Or ask {owners} to make that change.",
                     {"path": change.path},
                 )
+            review = self._owner_review(space, [c.path for c in changes])
             self._set_identity(path)
             before = current_head(path)
             sha: str | None = None
@@ -550,7 +553,7 @@ class Brain:
                     raise ApiError(422, "no-change", f"Nothing in {label} is waiting to be saved.")
                 sha, note = service.publish(
                     message.strip() or f"Save {plural(len(changes), 'change')} made on this "
-                    "computer", failed_push_note="push-failed")
+                    "computer", failed_push_note="push-failed", review=review)
             except GitCommandError as exc:
                 log.warning("save-local in %s failed: %s", path, exc)
                 raise ApiError(409, "conflict", f"These changes overlap with newer changes on "
@@ -560,7 +563,8 @@ class Brain:
                 pulled_infos = self._pulled_since(path, before, sha)
             remote = has_remote(path)
             branch = current_branch(path)
-        is_pr = space.kind != "personal" and space.manifest.write_policy == "pull-request"
+        is_pr = review if review is not None else (
+            space.kind != "personal" and space.manifest.write_policy == "pull-request")
         sent = remote and ("failed" not in (note or "") if is_pr else note is None)
         names = list(dict.fromkeys(
             self._author(c.author_name, c.author_email)["name"] for c in pulled_infos))
@@ -571,10 +575,10 @@ class Brain:
             if pulled_infos else ""
         if is_pr:
             result = "pull-request"
-            owners = _either(self._names(self._owners(space))) or "a reviewer"
+            owners = self._approver_text(space)
             become = "It becomes" if len(saved) == 1 else "They become"
             text = (f"Sent {count} for review. {become} part of {label} once {owners} "
-                    f"approves {them}." if sent else
+                    f"{'approve' if owners == 'you' else 'approves'} {them}." if sent else
                     f"Saved {count} for review on this computer, but sending {them} to GitHub "
                     "failed. Sync now to try again.")
         elif sent:
@@ -641,13 +645,16 @@ class Brain:
         for entry in tree(space.path):
             check_path = f"{entry.path}/" if entry.type == "dir" else entry.path
             editable, reason, _ = self._edit_check(space, check_path, role)
+            locked = is_locked(space.manifest, check_path)
             item: dict[str, Any] = {
                 "path": entry.path,
                 "name": entry.name,
                 "type": entry.type,
-                "locked": is_locked(space.manifest, check_path),
+                "locked": locked,
                 "editable": editable,
             }
+            if locked and editable:
+                item["owned"] = True
             if reason:
                 item["reason"] = reason
             if is_system_path(entry.path):
@@ -674,9 +681,11 @@ class Brain:
         space = self._space(sid)
         rel = _safe(rel_path)
         self._ensure_writable(space, rel)
+        owner, review = self._owns_locked(space), self._owner_review(space, [rel])
         outcome, pulled = self._run_save(
             space, rel, lambda service: write_file(service, rel, content, message,
-                                                   base_sha=base_sha, create=create))
+                                                   base_sha=base_sha, create=create,
+                                                   owner=owner, review=review))
         self._log_write(space, rel, "added" if create else "edited", outcome.outcome)
         body = self._outcome_json(space, outcome, pulled)
         if (space.path / rel).is_file():
@@ -690,8 +699,10 @@ class Brain:
         space = self._space(sid)
         rel = _safe(rel_path)
         self._ensure_writable(space, rel)
-        outcome, pulled = self._run_save(space, rel,
-                                         lambda service: delete_file(service, rel, message))
+        owner, review = self._owns_locked(space), self._owner_review(space, [rel])
+        outcome, pulled = self._run_save(
+            space, rel, lambda service: delete_file(service, rel, message, owner=owner,
+                                                    review=review))
         self._log_write(space, rel, "deleted", outcome.outcome)
         return self._outcome_json(space, outcome, pulled)
 
@@ -700,8 +711,10 @@ class Brain:
         old, new = _safe(from_path), _safe(to_path)
         self._ensure_writable(space, old)
         self._ensure_writable(space, new)
+        owner, review = self._owns_locked(space), self._owner_review(space, [old, new])
         outcome, pulled = self._run_save(
-            space, old, lambda service: move_file(service, old, new, message))
+            space, old, lambda service: move_file(service, old, new, message, owner=owner,
+                                                  review=review))
         self._log_write(space, new, f"renamed from {file_name(old)}", outcome.outcome)
         body = self._outcome_json(space, outcome, pulled)
         if (space.path / new).is_file():
@@ -794,10 +807,10 @@ class Brain:
 
     def members(self, sid: str) -> list[dict[str, Any]]:
         space = self._readable(sid)
-        owners = set(self._owners(space))
+        owners = {o.lower() for o in self._owners(space)}
         return [
             {"login": m.login, "name": m.name, "avatarUrl": m.avatar_url, "role": m.role,
-             "via": m.via, "team": m.team, "isOwner": m.login in owners,
+             "via": m.via, "team": m.team, "isOwner": m.login.lower() in owners,
              "pending": m.pending}
             for m in self._space_members(space)
         ]
@@ -856,7 +869,7 @@ class Brain:
                     ) -> dict[str, Any]:
         space = self._space_with_pending(rule_id)
         me = self.gh.me()
-        if self.access(space) != "admin" and me.login not in self._owners(space):
+        if self.access(space) != "admin" and not self._is_owner(space):
             owners = _either(self._names(self._owners(space))) or "its admins"
             raise ApiError(403, "forbidden",
                            f"Only {space_label(space)}'s owners ({owners}) or admins can "
@@ -983,10 +996,9 @@ class Brain:
         hint = None
         message = reason or "You can't change this file."
         if code == "locked":
-            owners = _either(self._names(self._owners(space))) or "the space owners"
-            message = (f"{rel} is locked in {label}. Only {owners} can change it, through a "
-                       "reviewed change. Nothing was saved.")
-            hint = f"Ask {owners} for a change."
+            owners = self._other_owners_text(space)
+            message = f"{rel} is locked in {label}. Only {owners} can change it. Nothing was saved."
+            hint = "Ask them to make the change."
         raise ApiError(403, code or "forbidden", message, hint)
 
     def _edit_check(self, space: Space, rel: str, role: str) -> tuple[bool, str | None, str | None]:
@@ -997,10 +1009,9 @@ class Brain:
             if space.manifest.write_policy == "read-only":
                 return False, f"{label} is set to view-only, so nothing can be saved here.", \
                     "read-only"
-            if is_locked(space.manifest, rel):
-                owners = _either(self._names(self._owners(space))) or "the space owners"
-                return (False, f"Locked. Only {owners} can change it, through a reviewed "
-                        "change.", "locked")
+            if is_locked(space.manifest, rel) and not self._owns_locked(space):
+                return (False, f"Locked. Only {self._other_owners_text(space)} can change this "
+                        "file. Ask them to make the change.", "locked")
         if role == "read":
             admins = sorted(m.name for m in self._space_members(space) if m.role == "admin")[:2]
             ask = f" To edit, ask {_either(admins)} for Can edit access." if admins else ""
@@ -1112,7 +1123,86 @@ class Brain:
                 out.extend(team.members if team else [name])
             else:
                 out.append(name)
+        creator = self.ctx.store.space(space_id(space)).get("createdBy")
+        if creator:
+            out.append(str(creator))
+        unique: dict[str, str] = {}
+        for owner in out:
+            unique.setdefault(owner.lower(), owner)
+        return list(unique.values())
+
+    # ---------- ownership of locked paths ----------
+
+    def _is_owner(self, space: Space) -> bool:
+        """Whether the person asking owns this space's locked paths: they're named in its
+        owners (CODEOWNERS), directly or through a team, or they created it. Matched on
+        the GitHub login, name and email, ignoring case and a leading @. For a space only
+        on this computer, this computer's git name and email count too."""
+        sid = space_id(space)
+        if sid not in self._owned:
+            if space.kind == "personal":
+                self._owned[sid] = True
+            else:
+                self._owned[sid] = bool(self._my_ids(space) & self._owner_ids(space))
+        return self._owned[sid]
+
+    def _owns_locked(self, space: Space) -> bool:
+        """An owner who may also write here at all (not view-only)."""
+        return self.access(space) in {"write", "admin"} and self._is_owner(space)
+
+    def _owner_review(self, space: Space, paths: list[str]) -> bool | None:
+        """How an owner's change to a locked path lands: reviewed when the space is
+        connected to GitHub, straight away when it's only on this computer. None when no
+        locked path is involved, so the space's write policy decides."""
+        if space.kind == "personal" or not self._owns_locked(space):
+            return None
+        if not any(is_locked(space.manifest, p) for p in paths):
+            return None
+        return has_remote(space.path)
+
+    def _my_ids(self, space: Space) -> set[str]:
+        me = self.gh.me()
+        ids = {me.login, me.name, me.email or ""}
+        # Only on this computer: whoever git says is signed in here is the person asking.
+        # Not in demo mode, where git is set to whoever acted last.
+        if not self.ctx.commit_as_viewer and not has_remote(space.path):
+            ids |= {_git_config(space.path, "user.name"), _git_config(space.path, "user.email")}
+        return _identities(ids)
+
+    def _owner_ids(self, space: Space) -> set[str]:
+        ids: set[str] = set()
+        for login in self._owners(space):
+            ids.add(login)
+            person = self._person(login)
+            if person:
+                ids |= {person.name, person.email or ""}
+        root = _root_commit(space.path)
+        if root and root.author_email != _SELFHUB_EMAIL:
+            ids |= {root.author_name, root.author_email}
+        return _identities(ids)
+
+    def _other_owners(self, space: Space) -> list[str]:
+        """Owners' names, never including the person asking."""
+        mine = self._my_ids(space)
+        meta = self.ctx.store.space(space_id(space))
+        out = []
+        for login in self._owners(space):
+            person = self._person(login)
+            name = person.name if person else str(
+                meta.get("createdByName") or login) if login == meta.get("createdBy") else login
+            theirs = _identities({login, name, (person.email or "") if person else ""})
+            if not theirs & mine:
+                out.append(name)
         return list(dict.fromkeys(out))
+
+    def _other_owners_text(self, space: Space) -> str:
+        return _either(self._other_owners(space)) or "this space's owners"
+
+    def _approver_text(self, space: Space) -> str:
+        """Who approves a reviewed change, as the person asking reads it."""
+        if self._is_owner(space):
+            return "you"
+        return _either(self._names(self._owners(space))) or "a reviewer"
 
     def _teams(self) -> list[Any]:
         try:
@@ -1194,6 +1284,16 @@ class Brain:
             "lastCommit": self._commit_json(last, space) if last else None,
             "format": file_format(rel, binary),
         }
+        if body["locked"] and editable:
+            review = self._owner_review(space, [rel])
+            body["owned"] = True
+            body["saveMode"] = "review" if review else "direct"
+            body["note"] = (
+                "You own this file. This space is connected to GitHub, so each change you "
+                "save becomes a reviewed change. It takes effect once you approve it on GitHub."
+                if review else
+                "You own this file. Changes are saved straight away because this space is "
+                "only on this computer.")
         if binary:
             body["binary"] = True
             reason = reason or "Binary file; it can't be edited here."
@@ -1209,15 +1309,16 @@ class Brain:
         label = space_label(space)
         note = outcome.note or ""
         if outcome.outcome == "pull-request":
-            owners = _either(self._names(self._owners(space))) or "a reviewer"
+            owners = self._approver_text(space)
             if "failed" in note:
                 text = ("Saved for review on this computer, but sending it to GitHub failed. "
                         "Sync now to try again.")
             elif "No remote" in note:
                 text = (f"Saved for review on this computer. It becomes part of {label} once "
-                        f"{owners} approves it.")
+                        f"{owners} {_approves(owners)} it.")
             else:
-                text = f"Sent for review. It becomes part of {label} once {owners} approves it."
+                text = (f"Sent for review. It becomes part of {label} once {owners} "
+                        f"{_approves(owners)} it.")
         elif outcome.sha is None:
             text = "Removed. It was never saved in the space's history."
         elif note:
@@ -1421,6 +1522,34 @@ def _gh_not_ready(problem: str | None) -> ApiError:
 
 def space_label(space: Space) -> str:
     return "your personal space" if space.kind == "personal" else space.name
+
+
+_SELFHUB_EMAIL = "noreply@selfhub.local"
+
+
+def _identities(values: set[str]) -> set[str]:
+    return {v.strip().lstrip("@").lower() for v in values if v and v.strip().lstrip("@")}
+
+
+def _git_config(path: Path, key: str) -> str:
+    try:
+        return run_git(["config", key], cwd=path).stdout.strip()
+    except GitCommandError:
+        return ""
+
+
+def _root_commit(path: Path) -> CommitInfo | None:
+    """The space's first commit: whoever made it created the space."""
+    try:
+        roots = run_git(["rev-list", "--max-parents=0", "HEAD"], cwd=path).stdout.split()
+        found = commits(path, limit=1, rev=roots[-1]) if roots else []
+    except GitCommandError:
+        return None
+    return found[0] if found else None
+
+
+def _approves(who: str) -> str:
+    return "approve" if who == "you" else "approves"
 
 
 def _either(names: list[str]) -> str:

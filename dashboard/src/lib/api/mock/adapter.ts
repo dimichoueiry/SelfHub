@@ -249,15 +249,24 @@ export function createMockAdapter(): SelfHubApi {
     return s.lockedPaths.some((p) => path === p || path.startsWith(p.endsWith("/") ? p : p + "/"));
   }
 
-  function editability(s: SeedSpace, path: string): { editable: boolean; reason?: string } {
+  function editability(s: SeedSpace, path: string): { editable: boolean; reason?: string; owned?: boolean; saveMode?: "direct" | "review"; note?: string } {
     const access = accessOf(s);
     if (access === "none") return { editable: false, reason: `You don't have access to ${s.name}.` };
     if (s.writePolicy === "read-only") return { editable: false, reason: "This space is read-only." };
     if (access === "read") return { editable: false, reason: "You can view this space." };
     if (isLocked(s, path)) {
-      const names = s.owners.map((o) => person(o).name);
-      const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}` : names[0];
-      return { editable: false, reason: `Locked. Only ${who} can change this file, through review.` };
+      if (s.owners.includes(me())) {
+        return {
+          editable: true,
+          owned: true,
+          saveMode: "review",
+          note: "You own this file. This space is connected to GitHub, so each change you save becomes a reviewed change. It takes effect once you approve it on GitHub.",
+        };
+      }
+      // Never name the person reading it as someone else who can change it.
+      const names = s.owners.filter((o) => o !== me()).map((o) => person(o).name);
+      const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}` : names[0] ?? "this space's owners";
+      return { editable: false, reason: `Locked. Only ${who} can change this file. Ask them to make the change.` };
     }
     return { editable: true };
   }

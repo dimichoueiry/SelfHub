@@ -289,8 +289,9 @@ def scaffold_files(manifest: SpaceManifest) -> dict[str, str]:
         files["locked/README.md"] = (
             f"# Locked — {name}\n\n"
             "Non-negotiable rules. Agents load every file here in full on every task and\n"
-            "follow them over anything else. Only the owners in .github/CODEOWNERS can\n"
-            "change them, through a reviewed pull request.\n"
+            "follow them over anything else. Only this space's owners can change these\n"
+            "files. When the space is connected to GitHub, each change is reviewed before\n"
+            "it takes effect.\n"
         )
         files["sops/README.md"] = (
             f"# SOPs — {name}\n\n"

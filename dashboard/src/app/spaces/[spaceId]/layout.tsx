@@ -156,9 +156,10 @@ function SpaceTitle({ name, tab }: { name: string; tab: string | null }) {
   return null;
 }
 
-/** On the Files tab, the chip follows the open file: a locked file says so. */
+/** On the Files tab, the chip follows the open file: a locked file says so, and says
+ * when it's yours to change. */
 function SpaceAccessChip({ space, onFiles }: { space: Space; onFiles: boolean }) {
   const path = useSearchParams().get("path");
   const file = useFile(space.id, onFiles && space.myAccess !== "none" ? path : null);
-  return <AccessChip space={space} lockedFile={onFiles && !!file.data?.locked} />;
+  return <AccessChip space={space} lockedFile={onFiles && !!file.data?.locked} ownedFile={onFiles && !!file.data?.owned} />;
 }

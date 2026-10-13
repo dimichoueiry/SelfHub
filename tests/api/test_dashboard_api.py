@@ -86,7 +86,8 @@ def test_locked_write_is_refused_and_nothing_changes(demo: tuple[TestClient, Pat
     repo = config / "spaces" / "northline"
     before = (repo / "locked/compliance.md").read_text()
     head = _git(repo, "rev-parse", "HEAD")
-    for headers in (None, MAYA):  # locked even for an admin
+    # Jordan can edit Northline but isn't one of its owners (the admins team).
+    for headers in (None, JORDAN):
         res = client.put("/api/spaces/northline/file", headers=headers, json={
             "path": "locked/compliance.md", "content": "# gone\n", "message": "x"})
         assert res.status_code == 403
@@ -269,7 +270,7 @@ def test_create_and_disconnect_space(demo: tuple[TestClient, Path]) -> None:
     assert res.status_code == 201, res.text
     space = res.json()
     assert space["id"] == "summit-solar" and space["myAccess"] == "admin"
-    assert space["owners"] == ["priya-nair"]
+    assert space["owners"] == ["priya-nair", "sam-okafor"]  # the creator always owns it
     assert (config / "spaces/summit-solar/brief.md").exists()
 
     res = client.post("/api/spaces", json={"action": "create", "name": "Creative",
@@ -460,7 +461,7 @@ def test_save_local_refuses_locked_files_by_name(demo: tuple[TestClient, Path]) 
                       encoding="utf-8")
     (northline / "sops/draft.md").write_text("# Draft\n", encoding="utf-8")
     before = _git(northline, "rev-parse", "HEAD")
-    res = client.post("/api/spaces/northline/save-local", headers=MAYA)
+    res = client.post("/api/spaces/northline/save-local", headers=JORDAN)
     assert res.status_code == 403
     error = res.json()["error"]
     assert error["code"] == "locked" and "locked/compliance.md" in error["message"]
@@ -577,7 +578,7 @@ def test_activity_history_and_errors_use_plain_words(demo: tuple[TestClient, Pat
                                                          "content": "x"})
     _plain(res.json()["error"]["message"])
     assert "Can edit" in res.json()["error"]["message"]
-    res = client.put("/api/spaces/northline/file", headers=MAYA,
+    res = client.put("/api/spaces/northline/file", headers=JORDAN,
                      json={"path": "locked/compliance.md", "content": "x"})
     _plain(res.json()["error"]["message"])
     _plain(res.json()["error"]["hint"])

@@ -29,7 +29,7 @@ test.describe.serial("live journeys", () => {
   test("(b) Sam opens a Northline locked file and sees who can change it", async ({ page }) => {
     await as(page, "sam");
     await page.goto("/spaces/northline?path=locked/compliance.md");
-    await expect(page.getByRole("note").getByText("Locked. Only Maya Chen or Marcus Bell can change this file, through a reviewed change.")).toBeVisible();
+    await expect(page.getByRole("note").getByText("Locked. Only Maya Chen or Marcus Bell can change this file. Ask them to make the change.")).toBeVisible();
     await expect(page.getByRole("link", { name: /Ask Maya Chen or Marcus Bell for a change/ })).toBeVisible();
     await expect(page.getByText("This file is locked")).toBeVisible();
     await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);

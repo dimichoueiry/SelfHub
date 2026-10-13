@@ -4,8 +4,12 @@ import { roleLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-function explain(space: Space, lockedFile: boolean) {
-  if (lockedFile) return "Locked files are rules every task follows. Only their approvers change them, through review.";
+function explain(space: Space, lockedFile: boolean, ownedFile: boolean) {
+  if (ownedFile)
+    return space.repo
+      ? "Locked files are rules every task follows. You own this one, so you can change it. Each change is reviewed before it takes effect."
+      : "Locked files are rules every task follows. You own this one, so you can change it.";
+  if (lockedFile) return "Locked files are rules every task follows. Only this space's owners can change them.";
   if (space.myAccess === "none") return "Access comes from GitHub. Ask an admin of this space to add you.";
   if (space.writePolicy === "read-only") return "Nobody can save changes to this space from SelfHub.";
   if (space.myAccess === "read") return "You can open every file here, but not change them.";
@@ -14,16 +18,27 @@ function explain(space: Space, lockedFile: boolean) {
       ? "Your changes are proposed for review and apply once an approver accepts them."
       : "Your saves go straight to GitHub.";
   const locked = space.lockedPaths.some((p) => !p.startsWith("."))
-    ? " Locked files can only be changed by approvers."
+    ? " Locked files can only be changed by this space's owners."
     : "";
   return `${policy}${locked}`;
 }
 
 /** Your access, as a quiet status line (not a button). */
-export function AccessChip({ space, lockedFile = false, className }: { space: Space; lockedFile?: boolean; className?: string }) {
+export function AccessChip({
+  space,
+  lockedFile = false,
+  ownedFile = false,
+  className,
+}: {
+  space: Space;
+  lockedFile?: boolean;
+  /** A locked file you own: you can change it. */
+  ownedFile?: boolean;
+  className?: string;
+}) {
   const access = space.writePolicy === "read-only" && space.myAccess !== "none" ? "read" : space.myAccess;
-  const Icon = lockedFile || access === "none" ? Lock : access === "read" ? Eye : ShieldCheck;
-  const label = lockedFile ? "This file is locked" : roleLabel[access];
+  const Icon = ownedFile ? ShieldCheck : lockedFile || access === "none" ? Lock : access === "read" ? Eye : ShieldCheck;
+  const label = ownedFile ? "You own this file" : lockedFile ? "This file is locked" : roleLabel[access];
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -33,7 +48,7 @@ export function AccessChip({ space, lockedFile = false, className }: { space: Sp
           {label}
         </span>
       </TooltipTrigger>
-      <TooltipContent className="max-w-64">{explain(space, lockedFile)}</TooltipContent>
+      <TooltipContent className="max-w-64">{explain(space, lockedFile, ownedFile)}</TooltipContent>
     </Tooltip>
   );
 }

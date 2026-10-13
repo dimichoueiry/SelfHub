@@ -112,7 +112,9 @@ export function Editor({
   const qc = useQueryClient();
   const textRef = useRef<HTMLTextAreaElement>(null);
 
-  const review = space.writePolicy === "pull-request";
+  // An owner's change to a locked file in a connected space is reviewed too.
+  const review = space.writePolicy === "pull-request" || file.saveMode === "review";
+  const ownerReview = !!file.owned && review;
   const mod = useModKey();
   const people = usePeople();
   const approverNames = space.owners.map((o) => people.data?.people.find((p) => p.login === o)?.name ?? o);
@@ -145,10 +147,11 @@ export function Editor({
       if (result.outcome === "pull-request") {
         const prUrl = result.prUrl || null;
         addProposal(qc, space.id, { path: file.path, prUrl: prUrl ?? "", branch: result.branch, date: new Date().toISOString(), message: result.commit.message });
+        const once = ownerReview ? "once you approve it on GitHub" : "once an approver accepts it";
         toast.success(`Change proposed in ${space.name}`, {
           description: prUrl
-            ? `A review is open on GitHub. ${fileName} changes for everyone once an approver accepts it.`
-            : `Saved for review. ${fileName} changes for everyone once an approver accepts it.`,
+            ? `A review is open on GitHub. ${fileName} changes for everyone ${once}.`
+            : `Saved for review. ${fileName} changes for everyone ${once}.`,
           action: prUrl ? { label: "Open review", onClick: () => window.open(prUrl, "_blank") } : undefined,
           duration: 8000,
         });
@@ -157,8 +160,10 @@ export function Editor({
         toast.success(
           result.pulled
             ? `Saved. Also brought in ${result.pulled} change${result.pulled === 1 ? "" : "s"}${result.pulledBy?.length ? ` from ${new Intl.ListFormat("en", { type: "conjunction" }).format(result.pulledBy.map((n) => n.split(" ")[0]))}` : ""}.`
-            : `Saved to ${space.name} and synced to GitHub`,
-          { description: `${file.path} is up to date for everyone with access.` },
+            : space.repo
+              ? `Saved to ${space.name} and synced to GitHub`
+              : `Saved to ${space.name}`,
+          { description: space.repo ? `${file.path} is up to date for everyone with access.` : `${file.path} is saved on this computer.` },
         );
       }
       onClose();
@@ -310,10 +315,16 @@ export function Editor({
             {review ? (
               <>
                 <GitPullRequestArrow className="size-3.5 shrink-0" aria-hidden />
-                Opens a review on GitHub. Nothing changes for others until {approvers} accepts it.
+                {ownerReview
+                  ? "You own this file. Saving opens a reviewed change on GitHub. It takes effect once you approve it."
+                  : `Opens a review on GitHub. Nothing changes for others until ${approvers} accepts it.`}
               </>
-            ) : (
+            ) : file.owned && file.note ? (
+              <>{file.note}</>
+            ) : space.repo ? (
               <>Saves go straight to GitHub. Everyone with access to {space.name} sees the change.</>
+            ) : (
+              <>Saves are kept on this computer. {space.name} isn&apos;t connected to GitHub.</>
             )}
           </p>
         </div>
