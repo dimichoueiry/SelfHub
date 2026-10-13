@@ -4,32 +4,82 @@ This guide covers running the SelfHub API and dashboard against your own data an
 connecting GitHub repos as spaces. Everything here was checked against the code. Anything
 that wasn't is marked **(unconfirmed)**.
 
-## 1. What you need
+## 1. Set up: one command
+
+```bash
+bash ~/Documents/GitHub/SelfHub/scripts/setup.sh
+```
+
+(Use the folder you put SelfHub in. No git yet, so you can't clone? On the SelfHub GitHub
+page, click **Code → Download ZIP**, unzip it, and run the script from that folder.)
+
+The script does every step. You never create a config file by hand.
+
+1. **Checks what SelfHub needs**, one line each, `[ok]` or `[missing]`:
+   - git
+   - GitHub CLI (gh): GitHub's own command-line app
+   - that you're logged in to GitHub (`gh auth status`)
+   - uv (installs the Python code), and Python 3.12 or newer (uv downloads it if missing)
+   - Node.js 20.9 or newer and pnpm, for the dashboard (skip both with `--no-dashboard`)
+2. **If something is missing**, it says how to install it on your system (macOS, Linux or
+   Windows) and stops. It also prints a ready-to-paste prompt for Claude Code or Codex: the
+   AI installs what's missing, helps you make a GitHub account, logs you in and runs setup again.
+3. **No GitHub account?** Each space is stored as a GitHub repo, so you need one. It's free:
+   <https://github.com/signup>. When you're not logged in, the script offers to run
+   `gh auth login` for you (HTTPS, browser login) and checks again afterwards.
+4. **Installs SelfHub** (`uv sync --all-packages`, then `pnpm install` in `dashboard/`).
+5. **Writes your settings**, and only what's missing:
+   - your own SelfHub folder (default `~/selfhub`), set up as a git repo
+   - `~/.selfhub/config.json`: where that folder is, and your GitHub username
+   - optionally a shared space (team, client or org): its folder, its `.selfhub/space.json`
+     and starter files, and its entry in `~/.selfhub/spaces.json`
+
+Run it again any time, for example after pulling new code. It keeps everything that's
+already set up and never replaces a config or `space.json` without asking.
+
+**No questions asked** (scripts, CI): pass `--yes`, or set `SELFHUB_NONINTERACTIVE=1`.
+
+| Flag | Env var | Default |
+|---|---|---|
+| `--personal-path DIR` | `SELFHUB_PERSONAL_PATH` | `~/selfhub` |
+| `--github-owner NAME` | `SELFHUB_GITHUB_OWNER` | the account you're logged in as |
+| `--space-name NAME` | `SELFHUB_SPACE_NAME` | no shared space (asks when interactive, default "Team") |
+| `--space-kind KIND` | `SELFHUB_SPACE_KIND` | `team` (`team`, `client` or `org`) |
+| `--space-path DIR` | `SELFHUB_SPACE_PATH` | `~/.selfhub/spaces/<name>` |
+| `--no-space` | `SELFHUB_NO_SPACE=1` | |
+| `--config-dir DIR` | `SELFHUB_CONFIG_HOME` | `~/.selfhub` |
+| `--replace` | | never replace an existing setting or `space.json` |
+| `--no-dashboard` | | check and install the dashboard too |
+| `--skip-install` | | run `uv sync` and `pnpm install` |
+
+Example:
+
+```bash
+bash scripts/setup.sh --yes --space-name "Apex Roofing" --space-kind client
+```
+
+### Reference: what the checks are based on
 
 | Tool | Version | Why |
 |---|---|---|
 | Python | 3.12 or newer (`requires-python = ">=3.12"`) | API and CLI |
 | [uv](https://docs.astral.sh/uv/) | any recent | installs the Python workspace |
 | Node.js | 20.9 or newer (Next.js 16 needs it) | dashboard |
-| pnpm | 9.14.4 (`packageManager` in `dashboard/package.json`) | dashboard |
+| pnpm | 9.14.4 (`packageManager` in `dashboard/package.json`); corepack also works | dashboard |
 | Git | any recent | every space is a git repo |
 | [GitHub CLI](https://cli.github.com) (`gh`) | any recent | roles, members and pull requests |
 
 **GitHub access.** With real data, the API talks to GitHub only through `gh api ...`
-(`packages/selfhub-api/src/selfhub_api/github.py`). It never reads a token itself. Sign in once:
-
-```bash
-gh auth login
-gh auth status        # check the "Token scopes" line
-```
+(`packages/selfhub-api/src/selfhub_api/github.py`). It never reads a token itself.
 
 Scopes needed. These come from the endpoints the code calls:
 
 - `repo`: read collaborators and permissions, open PRs, change roles. Private repos need it too.
 - `read:org`: list org members and teams (`orgs/<org>/members`, `orgs/<org>/teams`).
 
-`gh auth login` asks for `repo` and `read:org` by default **(unconfirmed: that's gh's
-behaviour, not this repo's)**. To add them later, run `gh auth refresh -s repo,read:org`.
+The setup script warns if your login is missing either one. `gh auth login` asks for `repo`
+and `read:org` by default **(unconfirmed: that's gh's behaviour, not this repo's)**. To add
+them later, run `gh auth refresh -h github.com -s repo,read:org`.
 
 Plain git commands (clone, pull, push) use your normal git credentials, not `gh`. Run
 `gh auth setup-git` if you want git to use the gh login too.
@@ -43,11 +93,7 @@ rule.
 
 ## 2. Install
 
-```bash
-cd ~/Documents/GitHub/SelfHub
-uv sync --all-packages --group dev     # re-run this after pulling: it adds the new selfhub-api package
-cd dashboard && pnpm install && cd ..
-```
+The setup script installs everything. To update after pulling new code, run it again.
 
 ## 3. Start the API (port 8788)
 
@@ -99,12 +145,12 @@ are read when the app is built.
 
 ## 5. Use your own selfhub data (`/Users/dimichoueiry/selfhub`)
 
-It plugs in with no extra setup:
+The setup script handles it:
 
-- `~/.selfhub/config.json` already has `"repo_path": "/Users/dimichoueiry/selfhub"`.
-- In real mode the API uses that as your **personal space** ("My space"). You're its admin.
-- `~/selfhub` is a git repo with remote `github.com/dimichoueiry/my_selfhub`, so **Sync now**
-  works on it.
+- It writes `~/.selfhub/config.json` with `"repo_path"` pointing at your SelfHub folder.
+  If `~/selfhub` already exists as a git repo, it uses it exactly as it is (no new commits).
+- In real mode the API uses that folder as your **personal space** ("My space"). You're its admin.
+- If the folder has a GitHub remote, **Sync now** works on it.
 
 To use a different folder for one run:
 
@@ -124,9 +170,9 @@ Things to know:
 
 ## 6. Add a GitHub repo as a space
 
-A repo can only be connected if it already has **`.selfhub/space.json`**. That file marks it
-as a space and sets its kind and write policy. A plain repo gets refused with "This folder
-isn't a SelfHub space yet."
+A repo is a space when it has **`.selfhub/space.json`**. That file marks it as a space and
+sets its kind and write policy. SelfHub writes it for you (below); don't create it by hand.
+Connecting a plain repo gets "This folder isn't a SelfHub space yet."
 
 ### a) Repo is already a SelfHub space
 
@@ -146,26 +192,25 @@ uv run selfhub space list
 
 ### b) Plain repo, not a space yet
 
-Turn it into one with the CLI, then it shows up in the dashboard:
+Copy it to your computer, then point the setup script at it. The script writes
+`.selfhub/space.json` and the starter files and connects the space:
 
 ```bash
-git clone git@github.com:you/client-apex.git ~/spaces/apex
-uv run selfhub space create ~/spaces/apex --name "Apex" --kind client --owner @you
+git clone https://github.com/you/client-apex.git ~/spaces/apex
+bash scripts/setup.sh --space-path ~/spaces/apex --space-name "Apex" --space-kind client
 ```
 
-`--kind` is `org`, `team` or `client`. This writes `.selfhub/space.json`, `README.md`,
-`locked/` and `rules/`, commits them, **pushes** to the remote, and registers the space.
-Default write policy: `org` = `pull-request`, `team` and `client` = `direct`.
+The CLI does the same: `uv run selfhub space create ~/spaces/apex --name "Apex" --kind client`.
 
-### c) Registry file (config)
+Either way it writes `.selfhub/space.json`, `README.md`, `locked/` and `rules/` (only files
+that don't exist yet), commits them, **pushes** to the remote, and registers the space.
+`--kind` is `org`, `team` or `client`. Default write policy: `org` = `pull-request`, `team`
+and `client` = `direct`.
 
-Connected spaces are listed in `~/.selfhub/spaces.json`:
+### c) The list of connected spaces
 
-```json
-{ "spaces": [ { "name": "Apex", "path": "/Users/dimichoueiry/spaces/apex" } ], "policies": [] }
-```
-
-Prefer the CLI or UI; they check names and manifests.
+SelfHub keeps it in `~/.selfhub/spaces.json`. The setup script, the CLI and the dashboard
+write it. You don't need to edit it.
 
 ### "Create a new space" in the dashboard
 
@@ -257,11 +302,11 @@ dir).
      that guess is wrong.
 3. **"This folder isn't a SelfHub space yet" / "couldn't copy that space from GitHub" when
    adding a repo.**
-   - The repo has no `.selfhub/space.json`: use §6b.
+   - The repo isn't a space yet: run the setup script on it (§6b).
    - Or git can't clone it: test with `git clone <url>` in a terminal. It uses your git
      credentials, not gh's (`gh auth setup-git` fixes that).
    - A sync "conflict" means GitHub has overlapping changes. SelfHub already aborted the
      rebase. Resolve it in the repo with git, then sync again.
 
-Also: `ModuleNotFoundError: selfhub_api` or `selfhub-api: command not found` means you need
-to re-run `uv sync --all-packages --group dev`.
+Also: `ModuleNotFoundError: selfhub_api` or `selfhub-api: command not found` means the
+install is out of date. Run `bash scripts/setup.sh` again.

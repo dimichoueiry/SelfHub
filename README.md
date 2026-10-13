@@ -27,7 +27,17 @@ If SelfHub is installed and available on `PATH`, these agents can call `selfhub`
 
 ## Install And Run
 
-Requirements:
+Quick start: one command. It checks git, the GitHub CLI (gh), your GitHub login, uv,
+Python and Node.js, tells you how to get anything missing (or gives you a prompt to paste into
+Claude Code or Codex), installs SelfHub and writes all its settings. You never create a config
+file by hand. See [SETUP.md](SETUP.md).
+
+```bash
+git clone https://github.com/dimichoueiry/SelfHub.git
+bash SelfHub/scripts/setup.sh
+```
+
+Manual install, if you prefer. Requirements:
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)

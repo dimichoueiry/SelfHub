@@ -52,7 +52,7 @@ function ServerError({ error, onMakeSpace }: { error: unknown; onMakeSpace?: () 
       ? error.message.replace(/\s*Make it one with `[^`]*`\.?/, "")
       : "The request didn't reach SelfHub. Check your connection, then try again.";
   const hint = notASpace(error)
-    ? "It needs SelfHub's settings file first. You can create a new space with this name instead; its files start empty."
+    ? "SelfHub sets that up for you: run SelfHub's setup script on this folder, or create a new space with this name instead (its files start empty)."
     : isApiError(error)
       ? error.hint
       : undefined;
