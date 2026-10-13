@@ -1,0 +1,18 @@
+import { open, shot, BASE, toasts } from "./lib.mjs";
+const { browser, page } = await open();
+await page.goto(BASE + "/spaces/ads-team?path=sops%2Ffacebook-ads.md");
+await page.getByText("Last edited by").waitFor(); await page.waitForTimeout(600);
+await page.getByRole("button", { name: "Edit", exact: true }).click(); await page.waitForTimeout(500);
+const ed = page.getByLabel(/Content of .*/);
+await ed.evaluate(el => el.setSelectionRange(0, 0));
+await ed.pressSequentially("QA TOP LINE\n\n");
+await page.waitForTimeout(400);
+console.log("dirty before:", (await page.locator("section[aria-label=File]").innerText()).includes("Unsaved changes"), "has line:", (await ed.inputValue()).includes("QA TOP LINE"));
+await shot(page, "re/r02b-before-getlatest");
+await page.getByRole("button", { name: "Get latest" }).click();
+await page.waitForTimeout(3000);
+const v = await ed.inputValue();
+console.log("after: has my line:", v.includes("QA TOP LINE"), "has cadence:", v.includes("Creative testing cadence"), "dirty:", (await page.locator("section[aria-label=File]").innerText()).includes("Unsaved changes"));
+console.log("toasts:", JSON.stringify(await toasts(page)));
+await shot(page, "re/r02b-after-getlatest");
+await browser.close();

@@ -1,0 +1,11 @@
+import { open, shot, BASE } from "./lib.mjs";
+const { browser, page } = await open({ width: 390, height: 844 });
+await page.goto(BASE + "/spaces/ads-team?path=templates%2Fcampaign-naming.csv"); await page.waitForTimeout(2500);
+const r = await page.evaluate(() => { const t = document.querySelector("section[aria-label=File] table"); const chain = []; let e = t.parentElement; while (e && chain.length < 5) { const s = getComputedStyle(e); chain.push({ tag: e.tagName, ox: s.overflowX, sw: e.scrollWidth, cw: e.clientWidth, tab: e.getAttribute("tabindex") }); e = e.parentElement; } return { tw: t.scrollWidth, chain }; });
+console.log(JSON.stringify(r));
+const sc = page.locator("section[aria-label=File] table").locator("xpath=..");
+await sc.evaluate(e => e.scrollLeft = 400).catch(()=>{});
+await page.mouse.move(200, 450); await page.mouse.wheel(300, 0); await page.waitForTimeout(400);
+await shot(page, "re/r09-csv-390-scrolled");
+console.log("window scrollX:", await page.evaluate(() => window.scrollX));
+await browser.close();

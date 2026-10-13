@@ -1,0 +1,44 @@
+import { open, shot, BASE, toasts } from "./lib.mjs";
+const { browser, page, logs } = await open();
+try {
+await page.goto(BASE + "/");
+await page.getByRole("heading", { name: /Good/ }).waitFor();
+const t0 = Date.now();
+await page.getByRole("link", { name: /Ads Team/ }).first().click();
+await page.getByRole("tree").waitFor();
+console.log("space nav ms", Date.now() - t0);
+await page.waitForTimeout(800);
+await shot(page, "02-ads-files-default");
+await page.getByRole("treeitem", { name: /facebook-ads/ }).click();
+await page.getByRole("heading", { level: 1 }).last().waitFor();
+await page.waitForTimeout(800);
+console.log("URL", page.url());
+await shot(page, "02-ads-fb-reading");
+await shot(page, "02-ads-fb-reading-full", true);
+// table overflow check
+const tbl = await page.evaluate(() => [...document.querySelectorAll("main table")].map(t => ({ w: t.scrollWidth, pw: t.parentElement.clientWidth, ow: getComputedStyle(t.parentElement).overflowX })));
+console.log("tables", JSON.stringify(tbl));
+console.log((await page.locator("main").innerText()).slice(0, 900));
+await page.getByRole("button", { name: "Edit", exact: true }).click();
+await page.waitForTimeout(600);
+await shot(page, "02-ads-fb-edit");
+const ed = page.getByLabel(/Content of .* \(markdown\)/);
+await ed.evaluate(el => el.setSelectionRange(el.value.length, el.value.length));
+await ed.pressSequentially("\n- QA independent check line\n");
+await shot(page, "02-ads-fb-edit-dirty");
+console.log("EDIT UI:", (await page.locator("main").innerText()).slice(0, 600));
+await page.getByLabel("Describe your change").fill("QA: add check line");
+const saveBtn = page.getByRole("button", { name: /Save|Propose/ }).first();
+console.log("save btn:", await saveBtn.innerText());
+await saveBtn.click();
+await page.waitForTimeout(3000);
+console.log("TOASTS", await toasts(page));
+await shot(page, "02-ads-fb-after-save");
+await page.reload();
+await page.getByRole("heading", { level: 1 }).last().waitFor();
+await page.waitForTimeout(1500);
+console.log("persisted:", (await page.locator("main").innerText()).includes("QA independent check line"));
+await shot(page, "02-ads-fb-after-reload");
+} catch (e) { console.log("ERR", e.message); await shot(page, "02-error"); }
+console.log(logs.join("\n"));
+await browser.close();

@@ -1,0 +1,42 @@
+import { open, shot, BASE, toasts } from "./lib.mjs";
+const { browser, page, logs } = await open();
+const T = async (l) => console.log(l, JSON.stringify(await toasts(page)));
+try {
+await page.goto(BASE + "/spaces/ads-team?path=templates%2Ffacebook-variants.md");
+await page.getByText("Last edited by").waitFor(); await page.waitForTimeout(500);
+await page.getByRole("button", { name: /More|actions|•••/i }).last().click();
+await page.waitForTimeout(400); await shot(page, "07-file-menu");
+console.log("MENU:", await page.getByRole("menu").innerText());
+await page.getByRole("menuitem", { name: /Rename/ }).click();
+await page.waitForTimeout(400);
+const d = page.getByRole("dialog");
+await shot(page, "07-rename-dialog");
+console.log("RENAME DLG:", await d.innerText());
+const inp = d.getByRole("textbox").first();
+console.log("prefill:", await inp.inputValue());
+await inp.fill("templates/facebook variants?.md");
+await d.getByRole("button", { name: /Rename/ }).last().click().catch(e=>console.log("click:", e.message.slice(0,60)));
+await page.waitForTimeout(1200); await shot(page, "07-rename-invalid");
+console.log("INVALID:", await d.innerText().catch(()=>"closed")); await T("t");
+await inp.fill("templates/fb-variants.md");
+await d.getByRole("button", { name: /Rename/ }).last().click();
+await page.waitForTimeout(3000); await T("after rename:");
+console.log("URL", page.url());
+await shot(page, "07-renamed");
+console.log("tree has new:", await page.getByRole("treeitem", { name: /fb-variants/ }).count(), "old:", await page.getByRole("treeitem", { name: /facebook-variants/ }).count());
+// delete
+await page.getByRole("button", { name: /More|actions|•••/i }).last().click();
+await page.getByRole("menuitem", { name: /Delete/ }).click();
+await page.waitForTimeout(400);
+const ad = page.getByRole("alertdialog").or(d).first();
+await shot(page, "07-delete-confirm");
+console.log("DELETE DLG:", await ad.innerText());
+await ad.getByRole("button", { name: /Delete/ }).last().click();
+await page.waitForTimeout(3000); await T("after delete:");
+console.log("URL", page.url());
+await shot(page, "07-deleted");
+console.log("tree has fb:", await page.getByRole("treeitem", { name: /fb-variants/ }).count());
+console.log("main:", (await page.locator("main").innerText()).slice(-400));
+} catch (e) { console.log("ERR", e.message); await shot(page, "07-error"); }
+console.log(logs.join("\n"));
+await browser.close();

@@ -1,0 +1,12 @@
+import { open, shot, BASE } from "./lib.mjs";
+const { browser, page } = await open({ reduced: true });
+const f = () => page.evaluate(() => (document.activeElement?.innerText || "").trim().slice(0, 40));
+await page.goto(BASE + "/spaces/ads-team?path=sops%2Fgoogle-ads.md"); await page.getByRole("tree").waitFor(); await page.waitForTimeout(800);
+await page.getByRole("treeitem", { name: /README/ }).click(); await page.waitForTimeout(1200);
+console.log("after click focus:", await f());
+await page.keyboard.press("ArrowUp"); await page.waitForTimeout(100); console.log("up ->", await f());
+await page.keyboard.press("ArrowUp"); await page.waitForTimeout(100); console.log("up ->", await f());
+await page.keyboard.press("Enter"); await page.waitForTimeout(1500);
+console.log("Enter -> url", decodeURIComponent(page.url()).split("path=")[1], "focus:", await f());
+await shot(page, "re/r04c-click-then-arrows");
+await browser.close();

@@ -1,0 +1,34 @@
+import { open, shot, BASE, toasts } from "./lib.mjs";
+const { browser, page, logs } = await open();
+const T = async (l) => console.log(l, JSON.stringify(await toasts(page)));
+const more = () => page.getByRole("button", { name: /More|actions/i }).last();
+try {
+await page.goto(BASE + "/spaces/ads-team");
+await page.getByRole("treeitem", { name: /facebook variants/ }).click();
+await page.waitForTimeout(1500);
+console.log("URL after tree click:", page.url()); await T("t");
+await page.reload(); await page.waitForTimeout(2500);
+console.log("after reload h1:", await page.locator("main h1").first().innerText().catch(()=>"?")); await T("reload toasts");
+await shot(page, "07b-question-mark-reload");
+await page.getByRole("treeitem", { name: /facebook variants/ }).click(); await page.waitForTimeout(1000);
+await more().click(); await page.getByRole("menuitem", { name: /Rename/ }).click();
+const d = page.getByRole("dialog");
+await d.getByRole("textbox").first().fill("templates/fb-variants.md");
+await d.getByRole("button", { name: /^Rename/ }).click();
+await page.waitForTimeout(400); await shot(page, "07b-renaming");
+await page.waitForTimeout(2500); await T("after rename:");
+console.log("URL", page.url());
+await shot(page, "07b-renamed");
+await more().click(); await page.getByRole("menuitem", { name: /Delete/ }).click();
+await page.waitForTimeout(400);
+const ad = page.getByRole("alertdialog").or(d).first();
+await shot(page, "07b-delete-confirm");
+console.log("DELETE DLG:", await ad.innerText());
+await ad.getByRole("button", { name: /Delete/ }).last().click();
+await page.waitForTimeout(2500); await T("after delete:");
+console.log("URL", page.url());
+await shot(page, "07b-deleted");
+console.log("tree fb:", await page.getByRole("treeitem", { name: /fb-variants/ }).count());
+} catch (e) { console.log("ERR", e.message); await shot(page, "07b-error"); }
+console.log(logs.join("\n"));
+await browser.close();

@@ -1,0 +1,34 @@
+import { open, shot, BASE, toasts } from "./lib.mjs";
+const S = (p, n, f) => shot(p, "re/" + n, f);
+const { browser, page, logs } = await open();
+const T = async (l) => console.log(l, JSON.stringify(await toasts(page)));
+const info = () => page.evaluate(() => { const e = document.activeElement; if (!e || e === document.body) return "(body)"; return `${e.getAttribute("role")||e.tagName.toLowerCase()}: ${(e.getAttribute("aria-label") || e.innerText || "").trim().replace(/\s+/g," ").slice(0,50)}`; });
+try {
+await page.goto(BASE + "/"); await page.getByText("Needs you").waitFor(); await page.waitForTimeout(900);
+await S(page, "r01-home-sam-1440");
+console.log("HOME:", (await page.locator("main").innerText()).slice(0, 1800));
+await page.goto(BASE + "/spaces/ads-team?path=sops%2Ffacebook-ads.md");
+await page.getByText("Last edited by").waitFor(); await page.waitForTimeout(800);
+await S(page, "r01-ads-reader-behind");
+console.log("READER top:", (await page.locator("section[aria-label=File]").innerText().catch(()=>page.locator("main").innerText())).slice(0, 500));
+await page.getByRole("button", { name: "Edit", exact: true }).click(); await page.waitForTimeout(700);
+await S(page, "r01-ads-edit-behind-notice");
+console.log("EDIT BAR:", (await page.locator("section[aria-label=File]").innerText().catch(()=>"")).slice(0, 600));
+const ed = page.getByLabel(/Content of .*/);
+await ed.evaluate(el => el.setSelectionRange(el.value.length, el.value.length));
+await ed.pressSequentially("\n- QA recheck line\n");
+await page.getByLabel("Describe your change").fill("QA recheck");
+await page.getByRole("button", { name: /Save & sync/ }).click();
+const dlg = page.getByRole("dialog").or(page.getByRole("alertdialog")).first();
+await dlg.waitFor({ timeout: 10000 }); await page.waitForTimeout(500);
+await S(page, "r01-conflict-dialog");
+console.log("CONFLICT:", await dlg.innerText());
+console.log("focused:", await info());
+console.log("buttons:", await dlg.getByRole("button").allInnerTexts());
+await page.getByRole("button", { name: /See what Jordan changed/ }).click(); await page.waitForTimeout(800);
+await S(page, "r01-conflict-diffview");
+console.log("DIFFVIEW:", await page.getByRole("dialog").or(page.getByRole("alertdialog")).first().innerText().catch(()=>"(closed)"));
+console.log("focus:", await info());
+} catch (e) { console.log("ERR", e.message); await S(page, "r01-error"); }
+console.log(logs.join("\n"));
+await browser.close();

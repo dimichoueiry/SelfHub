@@ -1,0 +1,30 @@
+import { open, shot, BASE, toasts } from "./lib.mjs";
+const { browser, page, logs } = await open({ user: "maya" });
+const T = async (l) => console.log(l, JSON.stringify(await toasts(page)));
+const d = page.getByRole("dialog");
+try {
+await page.goto(BASE + "/spaces/cedar-dental-qa/settings");
+await page.waitForLoadState("networkidle"); await page.waitForTimeout(800);
+await shot(page, "05b-space-settings", true);
+console.log("SETTINGS:", (await page.locator("main").innerText()).slice(0, 1500));
+const rm = page.getByRole("button", { name: /Disconnect|Remove|Delete/ }).first();
+await rm.click(); await page.waitForTimeout(500);
+await shot(page, "05b-disconnect-confirm");
+const ad = page.getByRole("alertdialog").or(d).first();
+console.log("CONFIRM:", await ad.innerText());
+await ad.getByRole("textbox").fill("Cedar Dental QA"); await ad.getByRole("button", { name: "Remove space" }).click();
+await page.waitForTimeout(2500); await T("t"); console.log("URL", page.url());
+await shot(page, "05b-after-disconnect");
+await page.goto(BASE + "/");
+await page.getByText("Needs you").waitFor(); await page.waitForTimeout(500);
+await page.getByRole("button", { name: /Add space/ }).first().click();
+await d.getByRole("button", { name: /Connect an existing repo/ }).click();
+await d.getByLabel("Repository").fill("/tmp/selfhub-qa-1587810344/spaces/cedar-dental-qa");
+await d.getByRole("button", { name: "Connect", exact: true }).click();
+await page.waitForTimeout(300); await shot(page, "05b-connecting");
+await page.waitForTimeout(3000);
+await shot(page, "05b-connected");
+console.log("CONNECTED:", await d.innerText().catch(()=>"closed"));
+} catch (e) { console.log("ERR", e.message); await shot(page, "05b-error"); }
+console.log(logs.join("\n"));
+await browser.close();

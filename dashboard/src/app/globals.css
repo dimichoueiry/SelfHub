@@ -1,0 +1,358 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Token decisions are documented in docs/dashboard-design-brief.md ("Token decisions"). */
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-heading: var(--font-sans);
+
+  /* Type scale: tight and deliberate, 14px UI base. */
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 22px;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-secondary: var(--muted);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-accent: var(--muted);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--danger);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--border-strong);
+  --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-success-text: var(--success-text);
+  --color-warning: var(--warning);
+  --color-warning-text: var(--warning-text);
+  --color-danger: var(--danger);
+  --color-danger-text: var(--danger-text);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-solid: var(--danger-solid);
+
+  --color-kind-org: var(--kind-org);
+  --color-kind-team: var(--kind-team);
+  --color-kind-client: var(--kind-client);
+  --color-kind-personal: var(--kind-personal);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--foreground);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--foreground);
+  --color-sidebar-primary: var(--primary);
+  --color-sidebar-primary-foreground: var(--primary-foreground);
+  --color-sidebar-ring: var(--ring);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 14px;
+  --radius-3xl: 18px;
+  --radius-4xl: 22px;
+
+  --shadow-float: var(--shadow-float-value);
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root {
+  --radius: 8px;
+
+  --background: oklch(0.993 0.002 75);
+  --surface: oklch(1 0 0);
+  --sidebar: oklch(0.975 0.003 75);
+  --sidebar-accent: oklch(0.935 0.004 75);
+  --muted: oklch(0.962 0.004 75);
+  --foreground: oklch(0.2 0.006 60);
+  --muted-foreground: oklch(0.47 0.008 60);
+  --subtle-foreground: oklch(0.54 0.007 60);
+  --border: oklch(0.915 0.004 75);
+  --border-strong: oklch(0.86 0.005 75);
+
+  --primary: oklch(0.42 0.13 268);
+  --primary-foreground: oklch(0.985 0.003 268);
+  --primary-soft: oklch(0.955 0.02 268);
+  --ring: oklch(0.42 0.13 268);
+
+  --success: oklch(0.6 0.13 155);
+  --success-text: oklch(0.47 0.11 155);
+  --warning: oklch(0.7 0.14 70);
+  --warning-text: oklch(0.5 0.11 62);
+  --danger: oklch(0.56 0.19 27);
+  --danger-text: oklch(0.5 0.18 27);
+  --danger-foreground: oklch(1 0 0);
+  /* Solid fill for destructive buttons: white text at ≥4.5:1 in both themes. */
+  --danger-solid: oklch(0.53 0.19 27);
+
+  --kind-org: oklch(0.32 0.04 265);
+  --kind-team: oklch(0.52 0.09 190);
+  --kind-client: oklch(0.6 0.13 68);
+  --kind-personal: oklch(0.52 0.15 295);
+
+  --shadow-float-value: 0 0 0 1px oklch(0.2 0.006 60 / 6%), 0 4px 12px oklch(0.2 0.006 60 / 6%),
+    0 16px 32px -8px oklch(0.2 0.006 60 / 10%);
+}
+
+.dark {
+  --background: oklch(0.165 0.004 65);
+  --surface: oklch(0.195 0.004 65);
+  --sidebar: oklch(0.145 0.004 65);
+  --sidebar-accent: oklch(0.235 0.004 65);
+  --muted: oklch(0.235 0.004 65);
+  --foreground: oklch(0.95 0.003 75);
+  --muted-foreground: oklch(0.72 0.006 70);
+  --subtle-foreground: oklch(0.62 0.006 70);
+  --border: oklch(0.27 0.004 65);
+  --border-strong: oklch(0.34 0.005 65);
+
+  --primary: oklch(0.72 0.12 268);
+  --primary-foreground: oklch(0.17 0.03 268);
+  --primary-soft: oklch(0.27 0.05 268);
+  --ring: oklch(0.72 0.12 268);
+
+  --success: oklch(0.7 0.14 155);
+  --success-text: oklch(0.77 0.13 155);
+  --warning: oklch(0.78 0.14 75);
+  --warning-text: oklch(0.82 0.12 78);
+  --danger: oklch(0.66 0.19 25);
+  --danger-text: oklch(0.74 0.15 25);
+  --danger-foreground: oklch(1 0 0);
+  --danger-solid: oklch(0.52 0.19 26);
+
+  --kind-org: oklch(0.8 0.03 265);
+  --kind-team: oklch(0.74 0.1 190);
+  --kind-client: oklch(0.8 0.13 75);
+  --kind-personal: oklch(0.74 0.13 295);
+
+  --shadow-float-value: 0 0 0 1px oklch(1 0 0 / 7%), 0 8px 24px oklch(0 0 0 / 40%);
+}
+
+/*
+ * @theme inline doesn't emit --color-* variables, but third-party styles (sonner) read
+ * them, so alias the ones they need.
+ */
+:root,
+.dark {
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--foreground);
+  --color-border: var(--border);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring;
+  }
+  html {
+    @apply font-sans;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-background text-foreground text-base;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 22%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Thin, quiet scrollbars. */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Markdown reading view. 15px body, 68ch measure. */
+.md {
+  font-size: 15px;
+  line-height: 26px;
+  color: var(--foreground);
+  max-width: 68ch;
+  overflow-wrap: anywhere;
+}
+.md > * + * {
+  margin-top: 14px;
+}
+.md h1 {
+  font-size: 26px;
+  line-height: 34px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin-bottom: 4px;
+}
+.md h2 {
+  font-size: 19px;
+  line-height: 28px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  margin-top: 34px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.md h3 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 620;
+  margin-top: 26px;
+}
+.md h2 + *,
+.md h3 + * {
+  margin-top: 10px;
+}
+.md p {
+  text-wrap: pretty;
+}
+.md a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--primary) 35%, transparent);
+  text-underline-offset: 3px;
+}
+.md a:hover {
+  text-decoration-color: var(--primary);
+}
+.md strong {
+  font-weight: 620;
+}
+.md ul,
+.md ol {
+  padding-left: 22px;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li + li {
+  margin-top: 4px;
+}
+.md li::marker {
+  color: var(--subtle-foreground);
+}
+.md li > ul,
+.md li > ol {
+  margin-top: 4px;
+}
+.md ul.contains-task-list {
+  list-style: none;
+  padding-left: 2px;
+}
+.md .task-list-item input {
+  margin-right: 8px;
+  accent-color: var(--primary);
+  translate: 0 1px;
+}
+.md blockquote {
+  border-left: 2px solid var(--border-strong);
+  padding: 2px 0 2px 16px;
+  color: var(--muted-foreground);
+}
+.md code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.md pre {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 20px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 28px 0;
+}
+.md .table-wrap {
+  /* Positioned, so absolutely positioned children (screen-reader text) can't widen the page. */
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+/* Tables scroll sideways instead of breaking words mid-way on narrow screens. */
+.md table {
+  overflow-wrap: normal;
+  word-break: normal;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 20px;
+}
+.md th {
+  text-align: left;
+  font-weight: 560;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  font-size: 13px;
+}
+.md th,
+.md td {
+  min-width: 9ch;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.md tr:last-child td {
+  border-bottom: 0;
+}
