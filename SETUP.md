@@ -81,9 +81,10 @@ Scopes needed. These come from the endpoints the code calls:
 - `repo`: read collaborators and permissions, open PRs, change roles. Private repos need it too.
 - `read:org`: list org members and teams (`orgs/<org>/members`, `orgs/<org>/teams`).
 
-The setup script warns if your login is missing either one. `gh auth login` asks for `repo`
-and `read:org` by default **(unconfirmed: that's gh's behaviour, not this repo's)**. To add
-them later, run `gh auth refresh -h github.com -s repo,read:org`.
+The setup script warns if your login is missing either one. gh's own help (gh 2.65,
+`gh auth login --help`) lists `repo`, `read:org` and `gist` as the scopes it needs, and a
+normal browser login gets them. To add them later, run
+`gh auth refresh -h github.com -s repo,read:org`.
 
 Plain git commands (clone, pull, push) use your normal git credentials, not `gh`. Run
 `gh auth setup-git` if you want git to use the gh login too.
@@ -93,7 +94,7 @@ rule.
 
 `GITHUB_TOKEN` is only read by the CLI's `selfhub init --github-owner ...` bootstrap
 (`selfhub_cli/service.py`). The dashboard API doesn't read it. `gh` itself respects
-`GH_TOKEN`/`GITHUB_TOKEN` **(unconfirmed: that's gh behaviour)**.
+`GH_TOKEN`/`GITHUB_TOKEN`, and they win over a stored login (`gh help environment`).
 
 ## 2. Install
 
@@ -101,10 +102,17 @@ The setup script installs everything. To update after pulling new code, run it a
 
 ## 3. Start the API (port 8788)
 
-Port **8787 is taken by AgentGrid** on this machine, and 8787 is also the API's built-in
-default (`DEFAULT_PORT = 8787` in `selfhub_api/app.py`). So always set the port:
+The API's built-in default port is 8787 (`DEFAULT_PORT = 8787` in `selfhub_api/app.py`), but
+the dashboard looks for it on **8788**. So always set the port to 8788. (On the maintainer's
+machine, 8787 is also taken by another app, AgentGrid.)
+
+Run it **from the SelfHub folder** (the one you ran `setup.sh` from). `uv run` starts the copy
+of SelfHub in the folder you're in, so running it from another checkout or a git worktree
+starts that copy's code instead. It reads the same `~/.selfhub` data, so it looks fine until a
+feature is missing.
 
 ```bash
+cd ~/Documents/GitHub/SelfHub    # your SelfHub folder
 # real data (your ~/selfhub plus any spaces you connected)
 SELFHUB_API_PORT=8788 uv run selfhub-api
 ```
@@ -139,7 +147,7 @@ You **must** set `NEXT_PUBLIC_SELFHUB_API=http`. Without it the dashboard uses i
 in-browser mock and ignores the API (`dashboard/src/lib/api/client.ts`).
 
 ```bash
-cd dashboard
+cd ~/Documents/GitHub/SelfHub/dashboard    # the same SelfHub folder as the API
 NEXT_PUBLIC_SELFHUB_API=http NEXT_PUBLIC_SELFHUB_API_URL=http://localhost:8788 pnpm dev
 # open http://localhost:3000
 ```
@@ -147,7 +155,7 @@ NEXT_PUBLIC_SELFHUB_API=http NEXT_PUBLIC_SELFHUB_API_URL=http://localhost:8788 p
 For a production build, set the same two variables for `pnpm build` and `pnpm start`. They
 are read when the app is built.
 
-## 5. Use your own selfhub data (`/Users/dimichoueiry/selfhub`)
+## 5. Use your own selfhub data (`~/selfhub`)
 
 The setup script handles it:
 
@@ -295,8 +303,9 @@ dir).
      8788.
    - Check `curl -s localhost:8788/api/health`. If `mode` is `demo`, an old demo API is still
      running. Find it with `lsof -nP -iTCP:8788 -sTCP:LISTEN` and stop it.
-   - Never stop what's on 8787: that's AgentGrid. "Address already in use" means another
-     process holds the port.
+   - "Address already in use" means another process holds the port. Check what it is
+     (`lsof -nP -iTCP:8788 -sTCP:LISTEN`) before you stop it. On the maintainer's machine,
+     8787 is AgentGrid: never stop that one.
 2. **"SelfHub can't reach GitHub… the GitHub command-line app isn't installed" / "GitHub
    didn't accept that request" / spaces show no access.**
    - Install `gh`, then run `gh auth login`.
@@ -311,6 +320,13 @@ dir).
      credentials, not gh's (`gh auth setup-git` fixes that).
    - A sync "conflict" means GitHub has overlapping changes. SelfHub already aborted the
      rebase. Resolve it in the repo with git, then sync again.
+
+4. **A feature is missing or errors with "Not Found"** (for example, Connect to GitHub fails
+   right away, or the Claude/Codex prompt has no folder path).
+   - The API on 8788 may be running from a different copy of SelfHub (another checkout or a
+     git worktree). See which folder it was started from:
+     `lsof -a -p $(lsof -tiTCP:8788 -sTCP:LISTEN) -d cwd`
+   - If that isn't your SelfHub folder, stop it and start it again from there (§3).
 
 Also: `ModuleNotFoundError: selfhub_api` or `selfhub-api: command not found` means the
 install is out of date. Run `bash scripts/setup.sh` again.
