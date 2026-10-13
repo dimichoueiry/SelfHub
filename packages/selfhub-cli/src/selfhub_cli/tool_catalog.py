@@ -116,6 +116,14 @@ CLI_TOOLS: tuple[ToolSpec, ...] = (
         purpose="Choose the policies your agents follow; org-enforced ones stay on.",
     ),
     ToolSpec(
+        name="skills",
+        usage=(
+            "selfhub skills install [--space <folder>] [--all] [--global] [--dry-run] | "
+            "skills show [--space <folder>] [--codex]"
+        ),
+        purpose="Install the agent skill pack (Claude Code skill and AGENTS.md section).",
+    ),
+    ToolSpec(
         name="console",
         usage="selfhub console",
         purpose="Open interactive command/chat shell.",

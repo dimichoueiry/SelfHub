@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from selfhub_core.contracts import CommandResult
 from selfhub_core.spaces import Space, SpaceError
 
 from selfhub_cli.chat_mode import run_console
@@ -31,6 +32,19 @@ from selfhub_cli.secrets import (
 )
 from selfhub_cli.service import SelfHubService
 from selfhub_cli.settings import config_dir, load_settings, save_settings
+from selfhub_cli.skills import (
+    OVERRIDES_PATH,
+    InstallAction,
+    Overrides,
+    PackContext,
+    SkillsError,
+    install_skills,
+    load_overrides,
+    render_agents_section,
+    render_skill,
+    skill_front_matter,
+    space_context,
+)
 from selfhub_cli.tool_catalog import (
     CLI_TOOLS,
     SLASH_TOOLS,
@@ -62,6 +76,7 @@ COMMAND_NAMES: tuple[str, ...] = (
     "learn",
     "rules",
     "policy",
+    "skills",
 )
 
 OPTION_COMMAND_ALIASES: dict[str, str] = {
@@ -742,6 +757,8 @@ policy_app = typer.Typer(help="Policies your agents follow: list, enable, disabl
 app.add_typer(space_app, name="space")
 app.add_typer(rules_app, name="rules")
 app.add_typer(policy_app, name="policy")
+skills_app = typer.Typer(help="Agent skill pack for Claude Code and Codex: install, show.")
+app.add_typer(skills_app, name="skills")
 
 JsonOption = Annotated[bool, typer.Option("--json", help="Emit JSON output")]
 RepoOption = Annotated[Path | None, typer.Option(help="Local SelfHub clone path")]
@@ -880,6 +897,81 @@ def policy_disable_command(
     as_json: JsonOption = False,
 ) -> None:
     _emit(_workspace(repo_path).set_policy(name, on=False).to_dict(), as_json)
+
+
+OverridesOption = Annotated[
+    Path | None,
+    typer.Option(help=f"Admin overrides file (default: <space>/{OVERRIDES_PATH})"),
+]
+
+
+@skills_app.command("install")
+def skills_install_command(
+    space: Annotated[
+        Path | None, typer.Option("--space", help="Space folder to install into")
+    ] = None,
+    all_spaces: Annotated[
+        bool, typer.Option("--all", help="Your personal SelfHub and every connected space")
+    ] = False,
+    global_: Annotated[
+        bool,
+        typer.Option("--global", help="Also install in ~/.claude/skills and ~/.codex/AGENTS.md"),
+    ] = False,
+    overrides: OverridesOption = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would change")] = False,
+    share: Annotated[
+        bool, typer.Option("--share", help="Don't hide the pack from git, so it can be committed")
+    ] = False,
+    repo_path: RepoOption = None,
+    as_json: JsonOption = False,
+) -> None:
+    targets: list[Path] = [space.expanduser()] if space else []
+    problems: list[str] = []
+    if all_spaces:
+        spaces, problems = _workspace(repo_path).spaces()
+        targets += [s.path for s in spaces if s.path.is_dir()]
+    if not targets and not global_:
+        _emit(CommandResult(False, "Pass --space <folder>, --all or --global.").to_dict(),
+              as_json)
+        raise typer.Exit(1)
+    actions: list[InstallAction] = []
+    try:
+        for target in dict.fromkeys(targets):
+            actions += install_skills(space=target, overrides=overrides, dry_run=dry_run,
+                                      share=share)
+        if global_:
+            actions += install_skills(global_home=Path.home(), overrides=overrides,
+                                      dry_run=dry_run)
+    except SkillsError as exc:
+        _emit(CommandResult(False, str(exc)).to_dict(), as_json)
+        raise typer.Exit(1) from exc
+    verb = "would " if dry_run else ""
+    lines = [f"{verb}{a.action:<9} {a.path}" for a in actions]
+    lines += [f"skipped   {p}" for p in problems]
+    payload = CommandResult(True, "\n".join(lines) or "Nothing to do.",
+                            {"actions": [a.to_dict() for a in actions], "dry_run": dry_run,
+                             "problems": problems})
+    _emit(payload.to_dict(), as_json)
+
+
+@skills_app.command("show")
+def skills_show_command(
+    space: Annotated[
+        Path | None, typer.Option("--space", help="Space folder (default: the any-space pack)")
+    ] = None,
+    codex: Annotated[bool, typer.Option("--codex", help="Show the AGENTS.md section")] = False,
+    overrides: OverridesOption = None,
+) -> None:
+    try:
+        if space:
+            ctx = space_context(space.expanduser(), overrides)
+        else:
+            ctx = PackContext(overrides=load_overrides(overrides) if overrides else Overrides())
+    except SkillsError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(render_agents_section(ctx) if codex else skill_front_matter() + render_skill(ctx),
+               nl=False)
 
 
 def main() -> None:
