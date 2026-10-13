@@ -279,7 +279,7 @@ API demo seed:
 ```bash
 uv run python scripts/seed_demo.py /tmp/selfhub-demo
 SELFHUB_DEMO=1 SELFHUB_CONFIG_DIR=/tmp/selfhub-demo SELFHUB_API_PORT=8788 uv run selfhub-api
-cd dashboard && NEXT_PUBLIC_SELFHUB_API=http pnpm dev
+cd dashboard && NEXT_PUBLIC_SELFHUB_API=http NEXT_PUBLIC_SELFHUB_API_URL=http://localhost:8788 pnpm dev
 ```
 
 **Switch:** stop the API and start it again with or without `SELFHUB_DEMO=1`. Keep the

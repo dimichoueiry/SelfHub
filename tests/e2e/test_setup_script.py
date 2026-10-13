@@ -215,3 +215,22 @@ def test_local_only_space_is_never_pushed(cfg: Path, tmp_path: Path) -> None:
     pushed = subprocess.run(["git", "-C", str(remote), "rev-parse", "--verify", "-q", "HEAD"],
                             capture_output=True, text=True)
     assert pushed.returncode != 0  # nothing reached the remote
+
+
+def test_dashboard_command_points_at_the_api_port(tmp_path: Path) -> None:
+    tools = ("git", "uv", "node", "pnpm")
+    if not all(shutil.which(t) for t in tools):
+        pytest.skip("needs node and pnpm")
+    cmd, env = _setup_cmd(tmp_path)
+    env.update(PATH=_bin_without_gh(tmp_path, FAKE_GH_LOGGED_OUT, tools=tools),
+               SELFHUB_API_PORT="8799")
+    cmd = [c for c in cmd if c != "--no-dashboard"] + ["--yes"]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env,
+                            stdin=subprocess.DEVNULL, timeout=120)
+    out = result.stdout
+    assert result.returncode == 0, out + result.stderr
+    assert "SELFHUB_API_PORT=8799 uv run selfhub-api" in out
+    dashboard = next(line for line in out.splitlines() if " dev" in line and "dashboard" in line)
+    assert "NEXT_PUBLIC_SELFHUB_API=http" in dashboard
+    assert "NEXT_PUBLIC_SELFHUB_API_URL=http://localhost:8799" in dashboard
+    assert out.count("GitHub lets you back up your spaces") == 1  # only at the check

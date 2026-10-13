@@ -333,9 +333,10 @@ if [ "$GITHUB" = 0 ]; then
 fi
 echo
 echo "To open the dashboard, run these in two Terminal windows:"
-echo "    cd \"$ROOT\" && ${CONFIG_ENV}SELFHUB_API_PORT=8788 uv run selfhub-api"
+API_PORT="${SELFHUB_API_PORT:-8788}"  # 8787 is the API's built-in default, but it's often taken
+echo "    cd \"$ROOT\" && ${CONFIG_ENV}SELFHUB_API_PORT=$API_PORT uv run selfhub-api"
 if [ "$DASHBOARD" = 1 ]; then
-  echo "    cd \"$ROOT/dashboard\" && NEXT_PUBLIC_SELFHUB_API=http ${PNPM[*]:-pnpm} dev"
+  echo "    cd \"$ROOT/dashboard\" && NEXT_PUBLIC_SELFHUB_API=http NEXT_PUBLIC_SELFHUB_API_URL=http://localhost:$API_PORT ${PNPM[*]:-pnpm} dev"
   echo "Then open http://localhost:3000"
 fi
 echo "Running setup again is safe: it keeps everything that's already set up."
@@ -343,8 +344,6 @@ echo "Running setup again is safe: it keeps everything that's already set up."
 if [ "$GITHUB" = 0 ]; then
   echo
   echo "Optional: connect GitHub later"
-  echo
-  echo "$GH_WHY" | indent
   github_fixes
   echo
   echo "Then run setup again, or connect a space from the dashboard:"
