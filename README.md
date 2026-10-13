@@ -148,6 +148,29 @@ selfhub agent-spec
 selfhub agent-spec --json
 ```
 
+## Company Brain (Spaces)
+
+SelfHub can also serve a 5-50 person team. Next to your personal repo, connect **org**,
+**team** and **client** spaces. Each one is its own git repo, and GitHub controls who can
+access it.
+
+```bash
+selfhub space create ~/spaces/northline --name Northline --kind org --owner @northline/admins
+selfhub space add git@github.com:northline/client-apex.git
+selfhub context "Facebook ad for Apex spring promo, follow my ads SOP"
+selfhub learn "Never use urgency phrasing." --space apex --why "too pushy"
+selfhub rules approve <rule-id> --space apex
+selfhub policy enable cite-sources
+```
+
+- Locked paths are loaded first on every task and are never written by SelfHub. On GitHub,
+  CODEOWNERS and branch protection make the lock apply to people too.
+- A client's memory loads only when the task names that client.
+- Feedback becomes a rule, a human approves it, and it is loaded from then on.
+- Org spaces send changes through pull requests by default.
+
+Full guide: [`docs/company-brain.md`](docs/company-brain.md).
+
 ## Development
 
 ```bash
