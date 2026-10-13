@@ -149,7 +149,7 @@ export function SyncButton({ space, className }: { space: Space; className?: str
             )}
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" className={cn("max-w-[calc(100vw-1rem)] p-0", local ? "w-[380px]" : "w-[340px]")}>
+        <PopoverContent align="end" className={cn("max-h-(--radix-popover-content-available-height) max-w-[calc(100vw-1rem)] overflow-y-auto p-0", local ? "w-[380px]" : "w-[340px]")}>
           {onlyHere ? (
             <OnlyHere
               space={space}

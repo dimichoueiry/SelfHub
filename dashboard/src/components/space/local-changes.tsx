@@ -75,7 +75,7 @@ export function LocalChangesPanel({ space, onSaved }: { space: Space; onSaved?: 
 
   return (
     <div className="space-y-3">
-      <ul className="divide-y rounded-lg border bg-surface" aria-label="Edited on this computer">
+      <ul className="max-h-72 divide-y overflow-y-auto overscroll-contain rounded-lg border bg-surface" aria-label="Edited on this computer">
         {changes.map((c) => {
           const Icon = statusIcon[c.status];
           return (
