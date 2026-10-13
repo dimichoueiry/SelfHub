@@ -25,3 +25,17 @@ build/
 
 # Local config
 .env
+.env.*
+*.log
+
+# Node / dashboard
+node_modules/
+.next/
+
+# Local tool state
+.claude/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
