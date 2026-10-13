@@ -74,6 +74,7 @@ from selfhub_core.spaces import (
     write_manifest,
 )
 
+from selfhub_api import connect_github
 from selfhub_api.errors import ApiError, from_file_error, from_provider_error
 from selfhub_api.github import (
     GitHubProvider,
@@ -357,6 +358,115 @@ class Brain:
         self.ctx.store.add_event("space", me.login, sid,
                                  f"{me.name} disconnected {space.name} (files kept on disk)")
         return {"removed": sid, "path": str(space.path), "message": result.message}
+
+    # ---------- connect to GitHub ----------
+
+    def github_check(self, sid: str) -> dict[str, Any]:
+        """Can this computer put the space on GitHub? Also gives the folder's real path,
+        for the copy-paste prompt the dashboard offers when it can't."""
+        space = self._local_only(sid)
+        if self.ctx.mode == "demo":
+            me = self.gh.me()
+            org = self._org_login()
+            found = connect_github.GhCheck(None, me.login, [org] if org != me.login else [])
+        else:
+            found = connect_github.check()
+        owners = ([{"login": found.login, "kind": "user"}] if found.login else []) + [
+            {"login": o, "kind": "org"} for o in found.orgs]
+        usual = self._usual_owner() if found.ready else None
+        return {
+            "ready": found.ready,
+            "problem": found.problem,
+            "login": found.login,
+            "owners": owners,
+            "defaultOwner": usual if usual in [o["login"] for o in owners] else found.login,
+            "suggestedName": _repo_name(space),
+            "path": str(space.path.resolve()),
+        }
+
+    def connect_github(self, sid: str, owner: str, name: str,
+                       visibility: str) -> dict[str, Any]:
+        space = self._local_only(sid)
+        label = space_label(space)
+        owner, name = owner.strip(), name.strip()
+        if visibility not in connect_github.VISIBILITIES:
+            raise ApiError(400, "invalid-visibility", "Choose Private or Public.")
+        if not connect_github.OWNER_NAME.match(owner):
+            raise ApiError(400, "invalid-owner", "Choose who will own the repository.")
+        if not connect_github.REPO_NAME.match(name) or name in {".", ".."}:
+            raise ApiError(400, "invalid-name", "Repository names can only use letters, "
+                           "numbers, hyphens (-), underscores (_) and dots.",
+                           f"Pick a name like {_repo_name(space)}.")
+        path = space.path
+        if current_head(path) is None:
+            raise ApiError(400, "empty", f"{label} has nothing saved yet, so there's nothing "
+                           "to send to GitHub.", "Save a file in it first, then connect it.")
+        repo = RepoRef(owner, name)
+        me = self.gh.me()
+        with self.ctx.locks.hold(path):
+            if self.ctx.mode == "demo":
+                # A demo space already has a placeholder repo of its own; that one is free.
+                if self.gh.has_repo(repo) and repo != self._repo(space):
+                    raise self._name_taken(repo)
+                self._add_demo_remote(path, sid)
+                self.gh.register_repo(repo, me.login)
+            else:
+                found = connect_github.check()
+                if not found.ready:
+                    raise _gh_not_ready(found.problem)
+                done = connect_github.create_and_push(path, owner, name, visibility)
+                if not done.ok:
+                    if done.taken:
+                        raise self._name_taken(repo)
+                    if has_remote(path):  # created, but the files didn't go
+                        self.ctx.store.update_space(sid, repo={"owner": owner, "name": name})
+                        self.ctx.locks.facts.drop(path)
+                        raise ApiError(502, "push-failed", f"SelfHub created {repo.full_name} "
+                                       "on GitHub, but couldn't send your files to it yet.",
+                                       "Check your internet connection, then use Sync now.",
+                                       {"technical": done.technical, "url": repo.url})
+                    log.warning("gh repo create %s failed: %s", repo.full_name, done.technical)
+                    raise ApiError(502, "create-failed", "GitHub didn't create the "
+                                   "repository.", "Check your internet connection and that "
+                                   f"your GitHub account can create repositories for {owner}, "
+                                   "then try again.", {"technical": done.technical})
+        self.ctx.store.update_space(sid, repo={"owner": owner, "name": name},
+                                    lastSyncAt=now_iso())
+        self.ctx.locks.facts.drop(path)
+        self._roles.pop(sid, None)
+        self._members.pop(sid, None)
+        self.ctx.store.add_event("space", me.login, sid, f"{me.name} connected {label} to "
+                                 f"GitHub as {repo.full_name}")
+        return {"space": self.get_space(sid),
+                "repo": {"owner": owner, "name": name, "url": repo.url}}
+
+    def _local_only(self, sid: str) -> Space:
+        """A space only on this computer, that you are an admin of."""
+        space = self._readable(sid)
+        label = space_label(space)
+        if self.access(space) != "admin":
+            raise ApiError(403, "forbidden", f"Only admins of {label} can connect it to "
+                           "GitHub.", "Ask an admin to connect this space to GitHub.")
+        if has_remote(space.path):
+            raise ApiError(409, "already-connected", f"{label} is already connected to "
+                           "GitHub.", "Use Sync now to send your latest changes.")
+        return space
+
+    def _name_taken(self, repo: RepoRef) -> ApiError:
+        other = next((f"{repo.name}-{n}" for n in range(2, 7)
+                      if not self.gh.has_repo(RepoRef(repo.owner, f"{repo.name}-{n}"))), None)
+        return ApiError(409, "name-taken", f"{repo.owner} already has a repository called "
+                        f"{repo.name} on GitHub.",
+                        f"Try {other}, or pick another name." if other else
+                        "Pick another name.", {"suggestion": other} if other else None)
+
+    def _usual_owner(self) -> str | None:
+        """Where the company's other spaces live on GitHub, if any."""
+        for space in self._spaces():
+            repo = self._repo(space)
+            if repo:
+                return repo.owner
+        return None
 
     def sync(self, sid: str) -> dict[str, Any]:
         space = self._readable(sid)
@@ -1293,6 +1403,20 @@ class Brain:
 
 def space_id(space: Space) -> str:
     return PERSONAL_ID if space.kind == "personal" else slug(space.name)
+
+
+def _repo_name(space: Space) -> str:
+    return "my-selfhub" if space.kind == "personal" else space_id(space)
+
+
+def _gh_not_ready(problem: str | None) -> ApiError:
+    if problem == "gh-missing":
+        return ApiError(503, "gh-missing", "The GitHub CLI (gh) isn't installed on this "
+                        "computer.", "Install it, log in, then choose Check again.",
+                        {"problem": problem})
+    return ApiError(401, "logged-out", "You're not logged in to GitHub on this computer.",
+                    "Log in with the GitHub CLI (gh), then choose Check again.",
+                    {"problem": "logged-out"})
 
 
 def space_label(space: Space) -> str:

@@ -12,6 +12,7 @@ GitHubProvider. Two implementations:
 
 from __future__ import annotations
 
+import getpass
 import json
 import re
 import shutil
@@ -111,6 +112,8 @@ class GitHubProvider(Protocol):
     def open_prs(self, repo: RepoRef) -> list[PullRequest]: ...
 
     def register_repo(self, repo: RepoRef, creator: str) -> None: ...
+
+    def has_repo(self, repo: RepoRef) -> bool: ...
 
 
 _LABEL = {"read": "Can view", "write": "Can edit", "admin": "Admin", "none": "No access"}
@@ -249,6 +252,9 @@ class FixtureGitHubProvider:
         return [PullRequest(int(p["number"]), str(p["title"]), str(p["url"]), str(p["author"]),
                             str(p["branch"])) for p in pulls]
 
+    def has_repo(self, repo: RepoRef) -> bool:
+        return repo.full_name in self.data["repos"]
+
     def register_repo(self, repo: RepoRef, creator: str) -> None:
         with self._lock:
             if repo.full_name not in self.data["repos"]:
@@ -381,7 +387,12 @@ class GhGitHubProvider:
 
     def me(self) -> Person:
         if self._me is None:
-            raw = self._api("user")
+            try:
+                raw = self._api("user")
+            except ProviderError:
+                # No GitHub CLI (gh), or not logged in: the dashboard still opens, as the
+                # person on this computer, so they can see their spaces and connect them.
+                return _local_person()
             self._me = Person(raw["login"], raw.get("name") or raw["login"],
                               raw.get("avatar_url") or f"https://github.com/{raw['login']}.png")
         return self._me
@@ -393,7 +404,10 @@ class GhGitHubProvider:
         try:
             raw = self._api(f"orgs/{self.org_login}")
         except ProviderError:
-            raw = self._api(f"users/{self.org_login}")
+            try:
+                raw = self._api(f"users/{self.org_login}")
+            except ProviderError:
+                return self.org_login, None
         return str(raw.get("name") or raw["login"]), raw.get("avatar_url")
 
     def people(self) -> list[Person]:
@@ -468,3 +482,20 @@ class GhGitHubProvider:
 
     def register_repo(self, repo: RepoRef, creator: str) -> None:
         return None
+
+    def has_repo(self, repo: RepoRef) -> bool:
+        try:
+            self._api(f"repos/{repo.full_name}")
+        except ProviderError:
+            return False
+        return True
+
+
+def _local_person() -> Person:
+    login = getpass.getuser()
+    try:
+        name = subprocess.run(["git", "config", "--global", "user.name"], check=False,
+                              capture_output=True, text=True).stdout.strip()
+    except OSError:
+        name = ""
+    return Person(login, name or login, "")

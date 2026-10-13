@@ -118,6 +118,12 @@ class SaveLocalRequest(_Body):
     message: str = ""
 
 
+class ConnectGitHubRequest(_Body):
+    owner: str
+    name: str
+    visibility: str = "private"
+
+
 class RejectRequest(_Body):
     reason: str | None = None
 
@@ -205,6 +211,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.delete("/api/spaces/{space_id}")
     def remove_space(space_id: str, user: UserHeader = None) -> dict[str, Any]:
         return brain(user).remove_space(space_id)
+
+    @app.get("/api/spaces/{space_id}/github")
+    def github_check(space_id: str, user: UserHeader = None) -> dict[str, Any]:
+        return brain(user).github_check(space_id)
+
+    @app.post("/api/spaces/{space_id}/connect-github")
+    def connect_github(space_id: str, body: ConnectGitHubRequest,
+                       user: UserHeader = None) -> dict[str, Any]:
+        return brain(user).connect_github(space_id, body.owner, body.name, body.visibility)
 
     @app.post("/api/spaces/{space_id}/sync")
     def sync(space_id: str, user: UserHeader = None) -> dict[str, Any]:
