@@ -9,6 +9,9 @@ const apiUrl = (process.env.NEXT_PUBLIC_SELFHUB_API_URL ?? "http://localhost:878
 const nextConfig: NextConfig = {
   // Lets the live (http) build sit next to the mock build: NEXT_DIST_DIR=.next-live.
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  experimental: {
+    agentUpgrade: "security",
+  },
   turbopack: {
     rules: {
       "*.css": {
